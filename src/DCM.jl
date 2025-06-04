@@ -6,9 +6,10 @@ and estimate models like Multinomial Logit.
 """
 module DCM
 
-include("Expressions.jl")
-include("Methods.jl")
+using Optim
 
-export Parameter, Variable, DCMExpression, logit_prob, evaluate
+include("Expressions.jl")
+include("Models.jl")
+include("Methods.jl")
 
 end
