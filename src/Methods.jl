@@ -1,6 +1,6 @@
 export evaluate, predict, loglikelihood, estimate
 
-function evaluate(expr::DCMExpression, data::DataFrame, params::Dict{Symbol, Float64})
+function evaluate(expr::DCMExpression, data::DataFrame, params::Dict{Symbol, <:Real})
     if expr isa DCMParameter
         return fill(params[expr.name], nrow(data))
     elseif expr isa DCMVariable
@@ -11,6 +11,9 @@ function evaluate(expr::DCMExpression, data::DataFrame, params::Dict{Symbol, Flo
         return evaluate(expr.left, data, params) .* evaluate(expr.right, data, params)
     elseif expr isa DCMExp
         return exp.(evaluate(expr.arg, data, params))
+    elseif expr isa DCMEqual
+        left_val = evaluate(expr.left, data, params)
+        return Float64.(left_val .== expr.right)
     else
         error("Unknown expression type")
     end
@@ -42,7 +45,7 @@ function estimate(model::LogitModel, choices::Vector{Int})
         return -loglikelihood(updated_model, choices)
     end
 
-    result = Optim.optimize(objective, θ0, Optim.BFGS())
+    result = Optim.optimize(objective, θ0, Optim.BFGS(); autodiff = :forward)
 
     θ̂ = Optim.minimizer(result)
     estimated_params = Dict(param_names .=> θ̂)

@@ -13,6 +13,11 @@ struct DCMVariable <: DCMExpression
     index::Union{Nothing, Int}  # For panel/individual data
 end
 
+struct DCMEqual <: DCMExpression
+    left::DCMExpression
+    right::Real
+end
+
 struct DCMSum <: DCMExpression
     left::DCMExpression
     right::DCMExpression
@@ -27,8 +32,9 @@ struct DCMExp <: DCMExpression
     arg::DCMExpression
 end
 
-import Base: +, *, exp
+import Base: ==, +, *, exp
 
+==(a::DCMExpression, b::Real) = DCMEqual(a, b)
 +(a::DCMExpression, b::DCMExpression) = DCMSum(a, b)
 *(a::DCMExpression, b::DCMExpression) = DCMMult(a, b)
 exp(a::DCMExpression) = DCMExp(a)
@@ -42,7 +48,7 @@ function Variable(name::Symbol; index=nothing)
 end
 
 function logit_prob(utilities::Vector{<:DCMExpression}, data::DataFrame,
-    params::Dict{Symbol, Float64}, availability::Vector{<:AbstractVector{Bool}})
+    params::Dict{Symbol, <:Real}, availability::Vector{<:AbstractVector{Bool}})
     Nalts = length(utilities)
 
     utils = [evaluate(U, data, params) for U in utilities]  # Vector of vectors

@@ -3,26 +3,7 @@ using DCM
 
 # Load dataset and filter RP observations only
 df = CSV.read("../data/apollo_modeChoiceData.csv", DataFrame)
-df = filter(:RP => x -> x == 1, df)
-
-# Define alternatives
-alts = [:car, :bus, :air, :rail]
-
-# Construct data dictionary for relevant variables
-# data = Dict{Symbol, Vector{Float64}}()
-# for alt in alts
-#     if alt != :car
-#         for attr in [:time, :cost, :access]
-#             varname = Symbol(string(attr, "_", alt))
-#             data[varname] = convert(Vector{Float64}, df[:, varname])
-#         end
-#     else
-#         for attr in [:time, :cost]
-#             varname = Symbol(string(attr, "_", alt))
-#             data[varname] = convert(Vector{Float64}, df[:, varname])
-#         end
-#     end
-# end
+df = filter(:SP => x -> x == 1, df)
 
 # Define variables and parameters
 asc_bus = Parameter(:asc_bus, value=0)
@@ -36,12 +17,14 @@ asc_rail = Parameter(:asc_rail, value=0)
 
 β_access = Parameter(:β_access, value=0)
 β_cost = Parameter(:β_cost, value=0)
+β_wifi = Parameter(:β_wifi, value=0)
+β_food = Parameter(:β_food, value=0)
 
 utilities = [
     β_time_car * Variable(:time_car) + β_cost * Variable(:cost_car),
     asc_bus  + β_time_bus * Variable(:time_bus)   + β_access * Variable(:access_bus)  + β_cost * Variable(:cost_bus),
-    asc_air  + β_time_air * Variable(:time_air)   + β_access * Variable(:access_air)  + β_cost * Variable(:cost_air),
-    asc_rail + β_time_rail * Variable(:time_rail) + β_access * Variable(:access_rail) + β_cost * Variable(:cost_rail)
+    asc_air  + β_time_air * Variable(:time_air)   + β_access * Variable(:access_air)  + β_cost * Variable(:cost_air) + β_wifi * (Variable(:service_air) == 2)  + β_food * (Variable(:service_air) == 3),
+    asc_rail + β_time_rail * Variable(:time_rail) + β_access * Variable(:access_rail) + β_cost * Variable(:cost_rail) + β_wifi * (Variable(:service_rail) == 2 ) + β_food * (Variable(:service_rail) == 3)
 ]
 
 # Define choice vector (1:car, 2:bus, 3:air, 4:rail)
@@ -59,7 +42,8 @@ availability = [
 params = Dict(
     :asc_bus => 0., :asc_air => 0., :asc_rail => 0.,
     :β_time_car => 0., :β_time_bus => 0., :β_time_air => 0., :β_time_rail => 0.,
-    :β_access => 0., :β_cost => 0.)
+    :β_access => 0., :β_cost => 0.,
+    :β_wifi => 0., :β_food => 0.)
 
 # Create model and estimate
 model = LogitModel(utilities; data=df, parameters=params, availability=availability)
