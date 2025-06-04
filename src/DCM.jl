@@ -6,7 +6,7 @@ and estimate models like Multinomial Logit.
 """
 module DCM
 
-using Optim
+using Optim, DataFrames
 
 include("Expressions.jl")
 include("Models.jl")

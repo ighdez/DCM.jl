@@ -9,20 +9,20 @@ df = filter(:RP => x -> x == 1, df)
 alts = [:car, :bus, :air, :rail]
 
 # Construct data dictionary for relevant variables
-data = Dict{Symbol, Vector{Float64}}()
-for alt in alts
-    if alt != :car
-        for attr in [:time, :cost, :access]
-            varname = Symbol(string(attr, "_", alt))
-            data[varname] = convert(Vector{Float64}, df[:, varname])
-        end
-    else
-        for attr in [:time, :cost]
-            varname = Symbol(string(attr, "_", alt))
-            data[varname] = convert(Vector{Float64}, df[:, varname])
-        end
-    end
-end
+# data = Dict{Symbol, Vector{Float64}}()
+# for alt in alts
+#     if alt != :car
+#         for attr in [:time, :cost, :access]
+#             varname = Symbol(string(attr, "_", alt))
+#             data[varname] = convert(Vector{Float64}, df[:, varname])
+#         end
+#     else
+#         for attr in [:time, :cost]
+#             varname = Symbol(string(attr, "_", alt))
+#             data[varname] = convert(Vector{Float64}, df[:, varname])
+#         end
+#     end
+# end
 
 # Define variables and parameters
 asc_bus = Parameter(:asc_bus, value=0)
@@ -62,7 +62,7 @@ params = Dict(
     :β_access => 0., :β_cost => 0.)
 
 # Create model and estimate
-model = LogitModel(utilities; data=data, parameters=params, availability=availability)
+model = LogitModel(utilities; data=df, parameters=params, availability=availability)
 results = estimate(model, choices)
 
 # Output results

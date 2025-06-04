@@ -41,7 +41,7 @@ function Variable(name::Symbol; index=nothing)
     return DCMVariable(name, index)
 end
 
-function logit_prob(utilities::Vector{<:DCMExpression}, data::Dict{Symbol, Vector{Float64}},
+function logit_prob(utilities::Vector{<:DCMExpression}, data::DataFrame,
     params::Dict{Symbol, Float64}, availability::Vector{<:AbstractVector{Bool}})
     Nalts = length(utilities)
 

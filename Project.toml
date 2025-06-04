@@ -4,9 +4,11 @@ authors = ["ighdez <joseignaciohernandezh@gmail.com> and contributors"]
 version = "1.0.0-DEV"
 
 [deps]
+DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 Optim = "429524aa-4258-5aef-a3af-852621145aeb"
 
 [compat]
+DataFrames = "1.7.0"
 Optim = "1.12.0"
 julia = "1.6.7"
 
