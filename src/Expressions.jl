@@ -1,77 +1,49 @@
-# Expressions
-export Variable, Coefficient, Expression, @var, @coef, +, -, *, /, build_expression
+export Parameter, Variable, DCMExpression, logit_prob
 
-# Variable: refers to a column in the data
-"""
-Refers to a column in the data
-"""
-struct Variable
-    name::Symbol
-end
+abstract type DCMExpression end
 
-# Coefficient: symbolic parameter with optional bounds or initial value
-"""
-Symbolic parameter with optional bounds or initial value
-"""
-mutable struct Coefficient
+struct DCMParameter <: DCMExpression
     name::Symbol
     value::Float64
-#    lower::Union{Nothing, Float64}
-#    upper::Union{Nothing, Float64}
+    fixed::Bool
 end
 
-# Convenience constructors
-macro var(name)
-    esc(:($(Variable)(Symbol($name))))
-end
-
-macro coef(name, init=0.0)
-    return :(Coefficient($(QuoteNode(name)), $init))
-    # return :(Coefficient($(QuoteNode(name)), nothing, nothing))
-end
-
-# Abstract type for expressions
-"""
-Abstract type for expressions
-"""
-abstract type Expression end
-
-
-# Expression leaf
-"""
-Expression leaf
-"""
-struct ExprLeaf <: Expression
-    value::Union{Variable, Coefficient, Float64}
-end
-
-# Expression operators
-"""
-Expression operators
-"""
-struct ExprOp <: Expression
-    op::Symbol
-    left::Expression
-    right::Expression
-end
-
-# Promote to expression leaf
-"""
-Promote to expression leaf
-"""
-promote_expr(x::Expression) = x
-promote_expr(x::Union{Variable, Coefficient, Float64}) = ExprLeaf(x)
-
-# Overload arithmetic
-import Base: +, -, *, /
-
-+(a, b) = ExprOp(:+, promote_expr(a), promote_expr(b))
--(a, b) = ExprOp(:-, promote_expr(a), promote_expr(b))
-*(a, b) = ExprOp(:*, promote_expr(a), promote_expr(b))
-/(a, b) = ExprOp(:/, promote_expr(a), promote_expr(b))
-
-# Utility function
-struct UtilityFunction
+struct DCMVariable <: DCMExpression
     name::Symbol
-    expr::Expression
+    index::Union{Nothing, Int}  # For panel/individual data
+end
+
+struct DCMSum <: DCMExpression
+    left::DCMExpression
+    right::DCMExpression
+end
+
+struct DCMMult <: DCMExpression
+    left::DCMExpression
+    right::DCMExpression
+end
+
+struct DCMExp <: DCMExpression
+    arg::DCMExpression
+end
+
+import Base: +, *, exp
+
++(a::DCMExpression, b::DCMExpression) = DCMSum(a, b)
+*(a::DCMExpression, b::DCMExpression) = DCMMult(a, b)
+exp(a::DCMExpression) = DCMExp(a)
+
+function Parameter(name::Symbol; value=0.0, fixed=false)
+    return DCMParameter(name, value, fixed)
+end
+
+function Variable(name::Symbol; index=nothing)
+    return DCMVariable(name, index)
+end
+
+function logit_prob(utilities::Vector{<:DCMExpression}, data::Dict{Symbol, Vector{Float64}}, params::Dict{Symbol, Float64})
+    utils = [evaluate(U, data, params) for U in utilities]  # Vector of vectors
+    exp_utils = [exp.(u) for u in utils]                    # Element-wise exp
+    denom = reduce(+, exp_utils)                            # Vector: denominator for each observation
+    return [eu ./ denom for eu in exp_utils]                # Vector of choice probability vectors
 end

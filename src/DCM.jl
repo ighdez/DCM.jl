@@ -9,4 +9,6 @@ module DCM
 include("Expressions.jl")
 include("Methods.jl")
 
+export Parameter, Variable, DCMExpression, logit_prob, evaluate
+
 end
