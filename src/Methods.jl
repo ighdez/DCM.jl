@@ -17,8 +17,16 @@ function evaluate(expr::DCMExpression, data::DataFrame, params::Dict{Symbol, <:R
     end
 end
 
+function predict(model::DiscreteChoiceModel)
+    error("predict not implemented for $(typeof(model))")
+end
+
 function predict(model::LogitModel)
     return logit_prob(model.utilities, model.data, model.parameters, model.availability)
+end
+
+function loglikelihood(model::DiscreteChoiceModel, choices::Vector{Int})
+    error("loglikelihood not implemented for $(typeof(model))")
 end
 
 function loglikelihood(model::LogitModel, choices::Vector{Int})
@@ -51,7 +59,25 @@ function collect_parameters(utilities::Vector{<:DCMExpression})
     return collect(values(seen))
 end
 
-function estimate(model::LogitModel, choicevar; verbose = true)
+function update_model(model::DiscreteChoiceModel, θ::Vector{Float64}, free_names, fixed_names, init_values)
+    error("update_model not implemented for $(typeof(model))")
+end
+
+function update_model(model::LogitModel, θ, free_names, fixed_names, init_values)
+    full_values = Dict{Symbol, Real}()
+    for (i, name) in enumerate(free_names)
+        full_values[name] = θ[i]
+    end
+    for name in fixed_names
+        full_values[name] = init_values[name]
+    end
+    return LogitModel(model.utilities;
+        data=model.data,
+        parameters=full_values,
+        availability=model.availability)
+end
+
+function estimate(model::DiscreteChoiceModel, choicevar; verbose = true)
 
     if any(ismissing, choicevar)
         error("Choice vector contains missing values. Please clean your data.")
@@ -71,22 +97,9 @@ function estimate(model::LogitModel, choicevar; verbose = true)
     # Initial guess only for free params
     θ0 = [init_values[n] for n in free_names]
 
-    function update_model(θ)
-        full_values = Dict{Symbol, Real}()
-        for (i, name) in enumerate(free_names)
-            full_values[name] = θ[i]
-        end
-        for name in fixed_names
-            full_values[name] = init_values[name]
-        end
-        return LogitModel(model.utilities;
-            data=model.data,
-            parameters=full_values,
-            availability=model.availability)
-    end
-
     function objective(θ)
-        updated = update_model(θ)
+        updated = update_model(model, θ, free_names, fixed_names, init_values)
+
         return -loglikelihood(updated, choices)
     end
 

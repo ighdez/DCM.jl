@@ -1,6 +1,8 @@
 using DataFrames
 
-struct LogitModel
+abstract type DiscreteChoiceModel end
+
+struct LogitModel <: DiscreteChoiceModel
     utilities::Vector{<:DCMExpression}
     data::DataFrame
     parameters::Dict
