@@ -1,6 +1,6 @@
-export Parameter, Variable, logit_prob
-
 abstract type DCMExpression end
+abstract type DCMBinary <: DCMExpression end
+abstract type DCMUnary <: DCMExpression end
 
 struct DCMParameter <: DCMExpression
     name::Symbol
@@ -13,22 +13,22 @@ struct DCMVariable <: DCMExpression
     index::Union{Nothing, Int}  # For panel/individual data
 end
 
-struct DCMEqual <: DCMExpression
+struct DCMEqual <: DCMBinary
     left::DCMExpression
     right::Real
 end
 
-struct DCMSum <: DCMExpression
+struct DCMSum <: DCMBinary
     left::DCMExpression
     right::DCMExpression
 end
 
-struct DCMMult <: DCMExpression
+struct DCMMult <: DCMBinary
     left::DCMExpression
     right::DCMExpression
 end
 
-struct DCMExp <: DCMExpression
+struct DCMExp <: DCMUnary
     arg::DCMExpression
 end
 
@@ -39,7 +39,7 @@ import Base: ==, +, *, exp
 *(a::DCMExpression, b::DCMExpression) = DCMMult(a, b)
 exp(a::DCMExpression) = DCMExp(a)
 
-function Parameter(name::Symbol; value=0.0, fixed=false)
+function Parameter(name::Symbol; value=0.0, fixed::Bool=false)
     return DCMParameter(name, value, fixed)
 end
 

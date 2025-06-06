@@ -6,6 +6,7 @@ df = CSV.read("../data/apollo_modeChoiceData.csv", DataFrame)
 df = filter(:RP => x -> x == 1, df)
 
 # Define variables and parameters
+asc_car = Parameter(:asc_car, value=0, fixed=true)
 asc_bus = Parameter(:asc_bus, value=0)
 asc_air = Parameter(:asc_air, value=0)
 asc_rail = Parameter(:asc_rail, value=0)
@@ -18,15 +19,13 @@ asc_rail = Parameter(:asc_rail, value=0)
 β_access = Parameter(:β_access, value=0)
 β_cost = Parameter(:β_cost, value=0)
 
-utilities = [
-    β_time_car * Variable(:time_car) + β_cost * Variable(:cost_car),
-    asc_bus  + β_time_bus * Variable(:time_bus)   + β_access * Variable(:access_bus)  + β_cost * Variable(:cost_bus),
-    asc_air  + β_time_air * Variable(:time_air)   + β_access * Variable(:access_air)  + β_cost * Variable(:cost_air),
-    asc_rail + β_time_rail * Variable(:time_rail) + β_access * Variable(:access_rail) + β_cost * Variable(:cost_rail)
-]
+# Define utility functions
+V1 = asc_car  + β_time_car * Variable(:time_car) + β_cost * Variable(:cost_car)
+V2 = asc_bus  + β_time_bus * Variable(:time_bus)   + β_access * Variable(:access_bus)  + β_cost * Variable(:cost_bus)
+V3 = asc_air  + β_time_air * Variable(:time_air)   + β_access * Variable(:access_air)  + β_cost * Variable(:cost_air)
+V4 = asc_rail + β_time_rail * Variable(:time_rail) + β_access * Variable(:access_rail) + β_cost * Variable(:cost_rail)
 
-# Define choice vector (1:car, 2:bus, 3:air, 4:rail)
-choices = convert(Vector{Int}, df.choice)
+utilities = [V1,V2,V3,V4]
 
 # Load availability data
 availability = [
@@ -36,20 +35,9 @@ availability = [
     df.av_rail .== 1
 ]
 
-# Define parameter dictionary
-params = Dict(
-    :asc_bus => 0., :asc_air => 0., :asc_rail => 0.,
-    :β_time_car => 0., :β_time_bus => 0., :β_time_air => 0., :β_time_rail => 0.,
-    :β_access => 0., :β_cost => 0.)
-
 # Create model and estimate
-model = LogitModel(utilities; data=df, parameters=params, availability=availability)
-results = estimate(model, choices)
+model = LogitModel(utilities; data=df, availability=availability)
+results = estimate(model, df.choice)
 
 # Output results
-println("Estimated Parameters:")
-for (k, v) in results.parameters
-    println("  ", k, " = ", round(v, digits=4))
-end
-
-println("Log-likelihood: ", round(results.loglikelihood, digits=4))
+summarize_results(results)
