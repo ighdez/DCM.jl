@@ -17,9 +17,7 @@ module DCM
 using Optim, DataFrames, ForwardDiff, LinearAlgebra, Distributions, Printf
 
 include("Expressions.jl")
+include("Utils.jl")
 include("Models.jl")
-include("Methods.jl")
-
-export LogitModel, Parameter, Variable, estimate, summarize_results
 
 end

@@ -13,6 +13,14 @@ struct DCMVariable <: DCMExpression
     index::Union{Nothing, Int}  # For panel/individual data
 end
 
+function Parameter(name::Symbol; value=0.0, fixed::Bool=false)
+    return DCMParameter(name, value, fixed)
+end
+
+function Variable(name::Symbol; index=nothing)
+    return DCMVariable(name, index)
+end
+
 struct DCMEqual <: DCMBinary
     left::DCMExpression
     right::Real
@@ -39,12 +47,23 @@ import Base: ==, +, *, exp
 *(a::DCMExpression, b::DCMExpression) = DCMMult(a, b)
 exp(a::DCMExpression) = DCMExp(a)
 
-function Parameter(name::Symbol; value=0.0, fixed::Bool=false)
-    return DCMParameter(name, value, fixed)
-end
-
-function Variable(name::Symbol; index=nothing)
-    return DCMVariable(name, index)
+function evaluate(expr::DCMExpression, data::DataFrame, params::Dict{Symbol, <:Real})
+    if expr isa DCMParameter
+        return fill(params[expr.name], nrow(data))
+    elseif expr isa DCMVariable
+        return data[:, expr.name]
+    elseif expr isa DCMSum
+        return evaluate(expr.left, data, params) .+ evaluate(expr.right, data, params)
+    elseif expr isa DCMMult
+        return evaluate(expr.left, data, params) .* evaluate(expr.right, data, params)
+    elseif expr isa DCMExp
+        return exp.(evaluate(expr.arg, data, params))
+    elseif expr isa DCMEqual
+        left_val = evaluate(expr.left, data, params)
+        return Float64.(left_val .== expr.right)
+    else
+        error("Unknown expression type")
+    end
 end
 
 function logit_prob(utilities::Vector{<:DCMExpression}, data::DataFrame,
@@ -61,3 +80,5 @@ function logit_prob(utilities::Vector{<:DCMExpression}, data::DataFrame,
     denom = reduce(+, exp_utils)                            # Vector: denominator for each observation
     return [eu ./ denom for eu in exp_utils]                # Vector of choice probability vectors
 end
+
+export Parameter, Variable
