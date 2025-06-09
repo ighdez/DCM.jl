@@ -5,6 +5,7 @@ This module implements the symbolic algebra system used to specify and evaluate 
 """
 
 """
+abstract type DCMExpression
 Base type for all symbolic expressions in the DCM system. All symbolic objects must inherit from this type.
 """
 abstract type DCMExpression end
@@ -38,6 +39,11 @@ import Base: ==, +, *, exp
 exp(a::DCMExpression) = DCMExp(a)
 
 """
+struct DCMParameter <: DCMExpression
+    name::Symbol
+    value::Float64
+    fixed::Bool
+
 Represents a named parameter in a utility expression.
 
 Fields:
@@ -54,6 +60,8 @@ end
 
 
 """
+function Parameter(name::Symbol; value=0.0, fixed::Bool=false)
+
 Convenient constructor for `DCMParameter`.
 
 # Arguments
@@ -71,6 +79,10 @@ function Parameter(name::Symbol; value=0.0, fixed::Bool=false)
 end
 
 """
+struct DCMVariable <: DCMExpression
+    name::Symbol
+    index::Union{Nothing, Int}
+
 Represents a data variable used in utility expressions.
 
 Fields:
@@ -86,6 +98,8 @@ end
 
 
 """
+function Variable(name::Symbol; index=nothing)
+
 Convenient constructor for `DCMVariable`.
 
 # Arguments
@@ -102,6 +116,8 @@ function Variable(name::Symbol; index=nothing)
 end
 
 """
+function evaluate(expr::DCMExpression, data::DataFrame, params::Dict{Symbol, <:Real})
+
 Evaluates a symbolic utility expression for all observations in a DataFrame.
 
 # Arguments
@@ -135,6 +151,9 @@ end
 
 
 """
+function logit_prob(utilities::Vector{<:DCMExpression}, data::DataFrame,
+    params::Dict{Symbol, <:Real}, availability::Vector{<:AbstractVector{Bool}})
+
 Computes choice probabilities for the Multinomial Logit model.
 
 # Arguments

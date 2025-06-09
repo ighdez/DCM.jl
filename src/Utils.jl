@@ -5,6 +5,8 @@ This module defines support tools such as parameter collection from symbolic uti
 """
 
 """
+function collect_parameters(utilities::Vector{<:DCMExpression})
+
 Extracts all distinct parameters from a vector of symbolic utility expressions.
 Traverses each expression and returns a list of unique `DCMParameter` instances.
 
@@ -36,6 +38,8 @@ end
 
 
 """
+function summarize_results(results)
+
 Pretty-prints estimation results including estimates, standard errors, t-stats, and p-values.
 
 # Arguments

@@ -7,6 +7,12 @@ This module defines the LogitModel struct and all associated functions required 
 using DataFrames
 
 """
+struct LogitModel <: DiscreteChoiceModel
+    utilities::Vector{<:DCMExpression}
+    data::DataFrame
+    parameters::Dict
+    availability::Vector{<:AbstractVector{Bool}}
+
 Data structure for multinomial logit models.
 
 Fields:
@@ -25,6 +31,13 @@ end
 
 
 """
+function LogitModel(
+    utilities::Vector{<:DCMExpression};
+    data::DataFrame,
+    parameters::Dict = Dict(),
+    availability::Vector{<:AbstractVector{Bool}} = []
+)
+
 Constructor for `LogitModel`.
 
 # Arguments
@@ -49,6 +62,8 @@ end
 
 
 """
+function predict(model::LogitModel)
+
 Computes predicted probabilities for each alternative using the current parameters in the model.
 
 # Arguments
@@ -65,6 +80,8 @@ end
 
 
 """
+function predict(model::LogitModel,results)
+
 Computes predicted probabilities using estimated parameters.
 
 # Arguments
@@ -83,6 +100,8 @@ end
 
 
 """
+function loglikelihood(model::LogitModel, choices::Vector{Int})
+
 Computes the log-likelihood value of the model given observed choices.
 
 # Arguments
@@ -108,6 +127,8 @@ end
 
 
 """
+function update_model(model::LogitModel, θ, free_names, fixed_names, init_values)
+
 Updates a LogitModel with a new set of parameter values during optimization.
 
 # Arguments
@@ -138,6 +159,8 @@ end
 
 
 """
+function estimate(model::LogitModel, choicevar; verbose = true)
+
 Estimates model parameters using maximum likelihood estimation.
 Uses `Optim.jl` to minimize the negative log-likelihood.
 
