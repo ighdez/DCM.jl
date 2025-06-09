@@ -1,4 +1,4 @@
-using CSV, DataFrames
+using CSV, DataFrames, Statistics
 using DCM
 
 # Load dataset and filter RP observations only
@@ -41,3 +41,8 @@ results = estimate(model, df.choice)
 
 # Output results
 summarize_results(results)
+
+# Predict
+preds = predict(model,results)
+println("\nAverage of Logit predictions")
+println(mean(preds,dims=1))

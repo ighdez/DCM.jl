@@ -20,6 +20,11 @@ function predict(model::LogitModel)
     return logit_prob(model.utilities, model.data, model.parameters, model.availability)
 end
 
+function predict(model::LogitModel,results)
+    probs=logit_prob(model.utilities, model.data, results.parameters, model.availability)
+    return hcat(probs...)
+end
+
 function loglikelihood(model::LogitModel, choices::Vector{Int})
     probs = predict(model)  # list of vectors: one per alternative
     loglik = 0.0
