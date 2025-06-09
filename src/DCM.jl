@@ -51,6 +51,7 @@ using Optim, DataFrames, ForwardDiff, LinearAlgebra, Distributions, Printf
 
 include("Expressions.jl")
 include("Utils.jl")
+include("Draws.jl")
 include("Models.jl")
 
 end

@@ -31,12 +31,18 @@ struct DCMExp <: DCMUnary
     arg::DCMExpression
 end
 
-import Base: ==, +, *, exp
+struct DCMMinus <: DCMUnary
+    arg::DCMExpression
+end
+
+import Base: ==, +, *, exp, -
+
 
 ==(a::DCMExpression, b::Real) = DCMEqual(a, b)
 +(a::DCMExpression, b::DCMExpression) = DCMSum(a, b)
 *(a::DCMExpression, b::DCMExpression) = DCMMult(a, b)
 exp(a::DCMExpression) = DCMExp(a)
+-(a::DCMExpression) = DCMMinus(a)
 
 """
 struct DCMParameter <: DCMExpression
@@ -116,6 +122,18 @@ function Variable(name::Symbol; index=nothing)
 end
 
 """
+Represents a random draw term in a symbolic expression.
+- `name`: Symbol used to identify the draw source (e.g., :time)
+"""
+struct DCMDraw <: DCMExpression
+    name::Symbol
+end
+
+function Draw(name::Symbol)
+    return DCMDraw(name)
+end
+
+"""
 function evaluate(expr::DCMExpression, data::DataFrame, params::Dict{Symbol, <:Real})
 
 Evaluates a symbolic utility expression for all observations in a DataFrame.
@@ -144,11 +162,49 @@ function evaluate(expr::DCMExpression, data::DataFrame, params::Dict{Symbol, <:R
     elseif expr isa DCMEqual
         left_val = evaluate(expr.left, data, params)
         return Float64.(left_val .== expr.right)
+    elseif expr isa DCMMinus
+        return -evaluate(expr.arg, data, params)
     else
         error("Unknown expression type")
     end
 end
 
+"""
+Extended evaluate function for symbolic expressions using draws.
+# Arguments:
+- expr: symbolic expression
+- data: DataFrame with variables
+- params: Dict of fixed parameter values (Symbol => Real)
+- draws: Dict of draws (Symbol => Matrix NxR)
+
+Returns a Matrix{Float64} of size NxR
+"""
+function evaluate(expr::DCMExpression, data::DataFrame, params::Dict{Symbol,<:Real}, draws::Dict{Symbol, Matrix{Float64}})
+    N = nrow(data)
+    R = first(values(draws)).size[2]
+
+    if expr isa DCMParameter
+        return fill(params[expr.name], N, R)
+    elseif expr isa DCMVariable
+        col = data[:, expr.name]
+        return repeat(reshape(col, N, 1), 1, R)
+    elseif expr isa DCMDraw
+        return draws[expr.name]  # N × R
+    elseif expr isa DCMSum
+        return evaluate(expr.left, data, params, draws) .+ evaluate(expr.right, data, params, draws)
+    elseif expr isa DCMMult
+        return evaluate(expr.left, data, params, draws) .* evaluate(expr.right, data, params, draws)
+    elseif expr isa DCMExp
+        return exp.(evaluate(expr.arg, data, params, draws))
+    elseif expr isa DCMEqual
+        left_val = evaluate(expr.left, data, params, draws)
+        return Float64.(left_val .== expr.right)
+        elseif expr isa DCMMinus
+    return -evaluate(expr.arg, data, params, draws)
+    else
+        error("Unknown expression type")
+    end
+end
 
 """
 function logit_prob(utilities::Vector{<:DCMExpression}, data::DataFrame,
@@ -182,4 +238,4 @@ function logit_prob(utilities::Vector{<:DCMExpression}, data::DataFrame,
     return [eu ./ denom for eu in exp_utils]                # Vector of choice probability vectors
 end
 
-export Parameter, Variable, evaluate, logit_prob
+export Parameter, Variable, evaluate, logit_prob, Draw

@@ -22,6 +22,6 @@ function estimate(model::DiscreteChoiceModel, choicevar; verbose = true)
 end
 
 include("models/LogitModel.jl")
-# include("MixedLogitModel.jl")
+include("models/MixedLogit.jl")
 
-export LogitModel, estimate, predict, loglikelihood
+export LogitModel, MixedLogitModel, estimate, predict, loglikelihood

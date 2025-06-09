@@ -18,22 +18,33 @@ Traverses each expression and returns a list of unique `DCMParameter` instances.
 
 Vector of `DCMParameter` instances
 """
-function collect_parameters(utilities::Vector{<:DCMExpression})
-    seen = Dict{Symbol, DCMParameter}()
-    function visit(expr)
-        if expr isa DCMParameter
-            seen[expr.name] = expr
-        elseif expr isa DCMBinary
-            visit(expr.left)
-            visit(expr.right)
-        elseif expr isa DCMUnary
-            visit(expr.arg)
-        end
+# function collect_parameters(utilities::Vector{<:DCMExpression})
+#     seen = Dict{Symbol, DCMParameter}()
+#     function visit(expr)
+#         if expr isa DCMParameter
+#             seen[expr.name] = expr
+#         elseif expr isa DCMBinary
+#             visit(expr.left)
+#             visit(expr.right)
+#         elseif expr isa DCMUnary
+#             visit(expr.arg)
+#         end
+#     end
+#     for u in utilities
+#         visit(u)
+#     end
+#     return collect(values(seen))
+# end
+function collect_parameters(expr::DCMExpression)
+    if expr isa DCMParameter
+        return [expr]
+    elseif expr isa DCMBinary
+        return collect_parameters(expr.left) ∪ collect_parameters(expr.right)
+    elseif expr isa DCMUnary
+        return collect_parameters(expr.arg)
+    else
+        return []
     end
-    for u in utilities
-        visit(u)
-    end
-    return collect(values(seen))
 end
 
 
