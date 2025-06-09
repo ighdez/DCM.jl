@@ -1,5 +1,21 @@
+"""
+Implementation of the LogitModel type and estimation methods.
+
+This module defines the LogitModel struct and all associated functions required to estimate, update, and predict a multinomial logit model. Built on top of the symbolic utilities defined in Expressions.jl.
+"""
+
 using DataFrames
 
+"""
+Data structure for multinomial logit models.
+
+Fields:
+
+* `utilities`: Vector of symbolic utility expressions (one per alternative)
+* `data`: DataFrame containing the input data
+* `parameters`: Dictionary of parameter values
+* `availability`: Vector of boolean vectors indicating alternative availability per observation
+  """
 struct LogitModel <: DiscreteChoiceModel
     utilities::Vector{<:DCMExpression}
     data::DataFrame
@@ -7,6 +23,21 @@ struct LogitModel <: DiscreteChoiceModel
     availability::Vector{<:AbstractVector{Bool}}
 end
 
+
+"""
+Constructor for `LogitModel`.
+
+# Arguments
+
+* `utilities`: vector of symbolic utility expressions
+* `data`: DataFrame with data used for evaluation
+* `parameters`: dictionary with initial/fixed parameter values (optional)
+* `availability`: availability flags per alternative (optional)
+
+# Returns
+
+A `LogitModel` instance
+"""
 function LogitModel(
     utilities::Vector{<:DCMExpression};
     data::DataFrame,
@@ -16,15 +47,53 @@ function LogitModel(
     return LogitModel(utilities, data, parameters, availability)
 end
 
+
+"""
+Computes predicted probabilities for each alternative using the current parameters in the model.
+
+# Arguments
+
+* `model`: a `LogitModel` instance
+
+# Returns
+
+A vector of vectors with choice probabilities
+"""
 function predict(model::LogitModel)
     return logit_prob(model.utilities, model.data, model.parameters, model.availability)
 end
 
+
+"""
+Computes predicted probabilities using estimated parameters.
+
+# Arguments
+
+* `model`: a `LogitModel` instance
+* `results`: a named tuple returned by `estimate`
+
+# Returns
+
+A matrix of size N x J, where N is number of observations, J number of alternatives
+"""
 function predict(model::LogitModel,results)
     probs=logit_prob(model.utilities, model.data, results.parameters, model.availability)
     return hcat(probs...)
 end
 
+
+"""
+Computes the log-likelihood value of the model given observed choices.
+
+# Arguments
+
+* `model`: `LogitModel` instance
+* `choices`: vector of integers representing chosen alternatives
+
+# Returns
+
+Total log-likelihood value
+"""
 function loglikelihood(model::LogitModel, choices::Vector{Int})
     probs = predict(model)  # list of vectors: one per alternative
     loglik = 0.0
@@ -37,6 +106,22 @@ function loglikelihood(model::LogitModel, choices::Vector{Int})
     return loglik
 end
 
+
+"""
+Updates a LogitModel with a new set of parameter values during optimization.
+
+# Arguments
+
+* `model`: current `LogitModel`
+* `θ`: vector of values for free parameters
+* `free_names`: names of free parameters
+* `fixed_names`: names of fixed parameters
+* `init_values`: original values used to complete full parameter vector
+
+# Returns
+
+Updated `LogitModel` instance
+"""
 function update_model(model::LogitModel, θ, free_names, fixed_names, init_values)
     full_values = Dict{Symbol, Real}()
     for (i, name) in enumerate(free_names)
@@ -51,6 +136,29 @@ function update_model(model::LogitModel, θ, free_names, fixed_names, init_value
         availability=model.availability)
 end
 
+
+"""
+Estimates model parameters using maximum likelihood estimation.
+Uses `Optim.jl` to minimize the negative log-likelihood.
+
+# Arguments
+
+* `model`: a `LogitModel` instance
+* `choicevar`: vector of chosen alternatives
+* `verbose`: whether to print optimization status (default: true)
+
+# Returns
+
+Named tuple with results, including:
+
+* `parameters`: estimated parameters
+* `std_errors`: standard errors
+* `vcov`: variance-covariance matrix
+* `loglikelihood`: log-likelihood value
+* `iters`: number of iterations
+* `converged`: convergence status
+* `estimation_time`: total time in seconds
+  """
 function estimate(model::LogitModel, choicevar; verbose = true)
 
     if any(ismissing, choicevar)

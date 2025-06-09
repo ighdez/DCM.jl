@@ -1,3 +1,21 @@
+"""
+Helper functions for working with utility expressions and model results.
+
+This module defines support tools such as parameter collection from symbolic utilities and result summarization.
+"""
+
+"""
+Extracts all distinct parameters from a vector of symbolic utility expressions.
+Traverses each expression and returns a list of unique `DCMParameter` instances.
+
+# Arguments
+
+* `utilities`: vector of utility expressions (`Vector{<:DCMExpression}`)
+
+# Returns
+
+Vector of `DCMParameter` instances
+"""
 function collect_parameters(utilities::Vector{<:DCMExpression})
     seen = Dict{Symbol, DCMParameter}()
     function visit(expr)
@@ -15,6 +33,19 @@ function collect_parameters(utilities::Vector{<:DCMExpression})
     end
     return collect(values(seen))
 end
+
+
+"""
+Pretty-prints estimation results including estimates, standard errors, t-stats, and p-values.
+
+# Arguments
+
+* `results`: named tuple returned from an estimation (should include keys `parameters`, `std_errors`, `loglikelihood`, `iters`, `converged`, and `estimation_time`)
+
+# Returns
+
+Nothing. Prints formatted output to stdout.
+"""
 
 function summarize_results(results)
     params = results.parameters
@@ -46,4 +77,4 @@ function summarize_results(results)
 
 end
 
-export summarize_results
+export summarize_results, collect_parameters

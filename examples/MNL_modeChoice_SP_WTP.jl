@@ -1,7 +1,7 @@
 using CSV, DataFrames
 using DCM
 
-# Load dataset and filter RP observations only
+# Load dataset and filter SP observations only
 df = CSV.read("../data/apollo_modeChoiceData.csv", DataFrame)
 df = filter(:SP => x -> x == 1, df)
 
@@ -23,6 +23,7 @@ wtp_food = Parameter(:wtp_food, value=0)
 
 β_cost = Parameter(:β_cost, value=0)
 
+# Define utility functions
 V1 = asc_car                                         + β_cost * (wtp_time_car * Variable(:time_car)   + Variable(:cost_car))
 V2 = asc_bus  +  β_cost * (wtp_time_bus * Variable(:time_bus)   + wtp_access * Variable(:access_bus)  + Variable(:cost_bus))      
 V3 = asc_air  +  β_cost * (wtp_time_air * Variable(:time_air)   + wtp_access * Variable(:access_air)  + Variable(:cost_air)  + wtp_no_frills * (Variable(:service_air) == 1)  + wtp_wifi * (Variable(:service_air) == 2)   + wtp_food * (Variable(:service_air) == 3))    

@@ -3,13 +3,46 @@ __precompile__()
 """
 DCM.jl — A symbolic, extensible package for estimating Discrete Choice Models in Julia.
 
-Features:
-- Symbolic utilities using Parameters and Variables
-- Support for Logit models with availability conditions
-- Compatible with DataFrames
-- Optim.jl-based estimation using automatic differentiation
+## Features
 
-Inspired by Biogeme, designed for Julia.
+* Symbolic utility specification using `Parameter` and `Variable`
+* Support for Logit models with availability constraints
+* Native compatibility with `DataFrames.jl`
+* Estimation routines powered by `Optim.jl` (analytic or automatic differentiation)
+* Modular design enabling future models like Mixed Logit, RRM, etc.
+
+## Example
+
+```julia
+using DCM
+
+asc = Parameter(:asc_car, value=0.0)
+β_time = Parameter(:β_time, value=0.0)
+
+V1 = asc + β_time * Variable(:time_car)
+V2 = β_time * Variable(:time_bus)
+
+model = LogitModel([V1, V2]; data=df, availability=[..., ...])
+results = estimate(model, df.choice)
+P = predict(model, results)
+```
+
+## Submodules
+
+* `Expressions.jl`: symbolic expressions (sum, multiplication, exp, etc.)
+* `Utils.jl`: utilities for model construction (parameter collection, updates)
+* `Models.jl`: base model type and model-specific definitions
+
+## Exports
+
+User-facing types and functions, including:
+
+* `Parameter`, `Variable`
+* `LogitModel`, `estimate`, `predict`
+
+## License
+
+MIT License
 """
 
 module DCM

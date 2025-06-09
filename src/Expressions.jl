@@ -1,25 +1,15 @@
+"""
+Defines symbolic expression types and evaluation methods for Discrete Choice Models.
+
+This module implements the symbolic algebra system used to specify and evaluate utility functions in DCM.jl. Core types include symbolic representations for parameters, variables, sums, multiplications, exponentials, and comparisons.
+"""
+
+"""
+Base type for all symbolic expressions in the DCM system. All symbolic objects must inherit from this type.
+"""
 abstract type DCMExpression end
 abstract type DCMBinary <: DCMExpression end
 abstract type DCMUnary <: DCMExpression end
-
-struct DCMParameter <: DCMExpression
-    name::Symbol
-    value::Float64
-    fixed::Bool
-end
-
-struct DCMVariable <: DCMExpression
-    name::Symbol
-    index::Union{Nothing, Int}  # For panel/individual data
-end
-
-function Parameter(name::Symbol; value=0.0, fixed::Bool=false)
-    return DCMParameter(name, value, fixed)
-end
-
-function Variable(name::Symbol; index=nothing)
-    return DCMVariable(name, index)
-end
 
 struct DCMEqual <: DCMBinary
     left::DCMExpression
@@ -47,6 +37,83 @@ import Base: ==, +, *, exp
 *(a::DCMExpression, b::DCMExpression) = DCMMult(a, b)
 exp(a::DCMExpression) = DCMExp(a)
 
+"""
+Represents a named parameter in a utility expression.
+
+Fields:
+
+* `name`: Symbol, name of the parameter
+* `value`: Float64, initial value of the parameter
+* `fixed`: Bool, whether the parameter is fixed during estimation
+  """
+struct DCMParameter <: DCMExpression
+    name::Symbol
+    value::Float64
+    fixed::Bool
+end
+
+
+"""
+Convenient constructor for `DCMParameter`.
+
+# Arguments
+
+* `name`: Symbol name of the parameter
+* `value`: initial value (default 0.0)
+* `fixed`: whether the parameter is fixed (default false)
+
+# Returns
+
+A `DCMParameter` object.
+"""
+function Parameter(name::Symbol; value=0.0, fixed::Bool=false)
+    return DCMParameter(name, value, fixed)
+end
+
+"""
+Represents a data variable used in utility expressions.
+
+Fields:
+
+* `name`: Symbol, corresponding to a column in the dataset
+* `index`: optional integer to reference individual data in panel settings
+"""
+
+struct DCMVariable <: DCMExpression
+    name::Symbol
+    index::Union{Nothing, Int}  # For panel/individual data
+end
+
+
+"""
+Convenient constructor for `DCMVariable`.
+
+# Arguments
+
+* `name`: Symbol name of the variable
+* `index`: Optional individual index (default: `nothing`)
+
+# Returns
+
+A `DCMVariable` object.
+"""
+function Variable(name::Symbol; index=nothing)
+    return DCMVariable(name, index)
+end
+
+"""
+Evaluates a symbolic utility expression for all observations in a DataFrame.
+
+# Arguments
+
+* `expr`: a symbolic expression of type `DCMExpression`
+* `data`: a `DataFrame` with the data for all individuals/alternatives
+* `params`: dictionary mapping parameter symbols to values
+
+# Returns
+
+A vector of numeric values representing the evaluated expression.
+"""
 function evaluate(expr::DCMExpression, data::DataFrame, params::Dict{Symbol, <:Real})
     if expr isa DCMParameter
         return fill(params[expr.name], nrow(data))
@@ -66,6 +133,21 @@ function evaluate(expr::DCMExpression, data::DataFrame, params::Dict{Symbol, <:R
     end
 end
 
+
+"""
+Computes choice probabilities for the Multinomial Logit model.
+
+# Arguments
+
+* `utilities`: vector of symbolic utility expressions (one per alternative)
+* `data`: DataFrame of input data
+* `params`: parameter dictionary with values for evaluation
+* `availability`: vector of boolean vectors indicating available alternatives
+
+# Returns
+
+A vector of vectors, each inner vector representing choice probabilities for each alternative per observation.
+"""
 function logit_prob(utilities::Vector{<:DCMExpression}, data::DataFrame,
     params::Dict{Symbol, <:Real}, availability::Vector{<:AbstractVector{Bool}})
     Nalts = length(utilities)
@@ -81,4 +163,4 @@ function logit_prob(utilities::Vector{<:DCMExpression}, data::DataFrame,
     return [eu ./ denom for eu in exp_utils]                # Vector of choice probability vectors
 end
 
-export Parameter, Variable
+export Parameter, Variable, evaluate, logit_prob

@@ -1,6 +1,5 @@
 using DCM
 using Test
 
-@testset "DCM.jl" begin
-    # Write your tests here.
-end
+include("test_expressions.jl")
+# include("test_logitmodel.jl")
