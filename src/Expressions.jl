@@ -179,9 +179,9 @@ Extended evaluate function for symbolic expressions using draws.
 
 Returns a Matrix{Float64} of size NxR
 """
-function evaluate(expr::DCMExpression, data::DataFrame, params::Dict{Symbol,<:Real}, draws::Dict{Symbol, Matrix{Float64}})
+function evaluate(expr::DCMExpression, data::DataFrame, params::AbstractDict, draws::AbstractDict)
     N = nrow(data)
-    R = first(values(draws)).size[2]
+    R = size(first(values(draws)), 2)
 
     if expr isa DCMParameter
         return fill(params[expr.name], N, R)
@@ -189,7 +189,7 @@ function evaluate(expr::DCMExpression, data::DataFrame, params::Dict{Symbol,<:Re
         col = data[:, expr.name]
         return repeat(reshape(col, N, 1), 1, R)
     elseif expr isa DCMDraw
-        return draws[expr.name]  # N × R
+        return draws[expr.name]
     elseif expr isa DCMSum
         return evaluate(expr.left, data, params, draws) .+ evaluate(expr.right, data, params, draws)
     elseif expr isa DCMMult
@@ -206,36 +206,4 @@ function evaluate(expr::DCMExpression, data::DataFrame, params::Dict{Symbol,<:Re
     end
 end
 
-"""
-function logit_prob(utilities::Vector{<:DCMExpression}, data::DataFrame,
-    params::Dict{Symbol, <:Real}, availability::Vector{<:AbstractVector{Bool}})
-
-Computes choice probabilities for the Multinomial Logit model.
-
-# Arguments
-
-* `utilities`: vector of symbolic utility expressions (one per alternative)
-* `data`: DataFrame of input data
-* `params`: parameter dictionary with values for evaluation
-* `availability`: vector of boolean vectors indicating available alternatives
-
-# Returns
-
-A vector of vectors, each inner vector representing choice probabilities for each alternative per observation.
-"""
-function logit_prob(utilities::Vector{<:DCMExpression}, data::DataFrame,
-    params::Dict{Symbol, <:Real}, availability::Vector{<:AbstractVector{Bool}})
-    Nalts = length(utilities)
-
-    utils = [evaluate(U, data, params) for U in utilities]  # Vector of vectors
-    
-    exp_utils = [exp.(u) for u in utils]                    # Element-wise exp
-    for j in 1:Nalts
-        exp_utils[j] = [avail ? exp(u) : 0.0 for (u, avail) in zip(utils[j], availability[j])]
-    end
-
-    denom = reduce(+, exp_utils)                            # Vector: denominator for each observation
-    return [eu ./ denom for eu in exp_utils]                # Vector of choice probability vectors
-end
-
-export Parameter, Variable, evaluate, logit_prob, Draw
+export Parameter, Variable, evaluate, Draw

@@ -5,48 +5,44 @@ using DCM
 df = CSV.read("../data/apollo_swissRouteChoiceData.csv", DataFrame)
 
 # Define parameters for lognormal random coefficients
-# b_tt = -exp(mu_tt + sigma_tt * draw_tt)
-mu_tt     = Parameter(:mu_tt, value=0.0)
-sigma_tt  = Parameter(:sigma_tt, value=1.0)
+mu_tt     = Parameter(:mu_tt, value=-1.9850)
+sigma_tt  = Parameter(:sigma_tt, value=0.4740)
 
-mu_tc     = Parameter(:mu_tc, value=0.0)
-sigma_tc  = Parameter(:sigma_tc, value=1.0)
+mu_tc     = Parameter(:mu_tc, value=-1.0228)
+sigma_tc  = Parameter(:sigma_tc, value=1.0032)
+
+mu_hw     = Parameter(:mu_hw, value=-2.9325)
+sigma_hw  = Parameter(:sigma_hw, value=0.8046)
+
+mu_ch     = Parameter(:mu_ch, value=0.6278)
+sigma_ch  = Parameter(:sigma_ch, value=0.8456)
 
 # Define variables
 tt = Draw(:tt)  # draw for travel time
 tc = Draw(:tc)  # draw for travel cost
+hw = Draw(:hw)  # draw for travel time
+ch = Draw(:ch)  # draw for travel cost
 
 # Define random parameters
 b_tt = -exp(mu_tt + sigma_tt * tt)
-b_tc = - exp(mu_tc + sigma_tc * tc)
+b_tc = -exp(mu_tc + sigma_tc * tc)
+b_hw = -exp(mu_hw + sigma_hw * hw)
+b_ch = -exp(mu_ch + sigma_ch * ch)
 
-# Define utility functions (alternatives 1, 2, 3)
-V1 = b_tt * Variable(:tt1) + b_tc * Variable(:tc1)
-V2 = b_tt * Variable(:tt2) + b_tc * Variable(:tc2)
-V3 = b_tt * Variable(:tt3) + b_tc * Variable(:tc3)
+# Define utility functions (alternatives 1, 2)
+V1 = b_tt * Variable(:tt1) + b_tc * Variable(:tc1) + b_hw * Variable(:hw1) + b_ch * Variable(:ch1)
+V2 = b_tt * Variable(:tt2) + b_tc * Variable(:tc2) + b_hw * Variable(:hw2) + b_ch * Variable(:ch2)
 
-all_params = collect_parameters.([V1, V2, V3]) |> Iterators.flatten |> collect
-parameters = Dict(p.name => p.value for p in all_params)
-for p in all_params
-    println("Found parameter: ", p.name, " = ", p.value)
-end
-# exit()
-
-for key in [:mu_tt, :sigma_tt, :mu_tc, :sigma_tc]
-    @assert haskey(parameters, key) "Missing parameter: $key"
-end
-# Define utility functions (alternatives 1, 2, 3)
-# V1 = -exp(mu_tt + sigma_tt * tt) * Variable(:tt1) - exp(mu_tc + sigma_tc * tc) * Variable(:tc1)
-# V2 = -exp(mu_tt + sigma_tt * tt) * Variable(:tt2) - exp(mu_tc + sigma_tc * tc) * Variable(:tc2)
-# V3 = -exp(mu_tt + sigma_tt * tt) * Variable(:tt3) - exp(mu_tc + sigma_tc * tc) * Variable(:tc3)
-
-utilities = [V1, V2, V3]
+utilities = [V1, V2]
 
 # Availability (assumed all available for simplicity)
-availability = [trues(nrow(df)) for _ in 1:3]
+availability = [
+    trues(nrow(df)),
+    trues(nrow(df))
+]
 
 # Build and estimate the Mixed Logit model
-model = MixedLogitModel(utilities; data=df, parameters=Dict(), availability=availability, R=200, draw_scheme=:mlhs)
+model = MixedLogitModel(utilities; data=df, id=df.ID, availability=availability, R=500, draw_scheme=:mlhs)
 results = estimate(model, df.choice)
 
 # Output results

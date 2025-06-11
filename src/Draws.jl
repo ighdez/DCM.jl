@@ -10,7 +10,7 @@ Struct to hold simulation draws used for random parameters.
 - `R`: number of draws per individual
 """
 struct Draws
-    values::Dict{Symbol, Matrix{Float64}}
+    values::Dict
     scheme::Symbol
     R::Int
 end
@@ -28,7 +28,7 @@ Generates simulation draws for each parameter name provided.
 - `Draws` object containing the generated values
 """
 function generate_draws(param_names::Vector{Symbol}, N::Int, R::Int; scheme::Symbol = :normal)
-    values = Dict{Symbol, Matrix{Float64}}()
+    values = Dict()
 
     for pname in param_names
         if scheme == :normal

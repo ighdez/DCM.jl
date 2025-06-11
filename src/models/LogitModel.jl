@@ -7,11 +7,7 @@ This module defines the LogitModel struct and all associated functions required 
 using DataFrames
 
 """
-struct LogitModel <: DiscreteChoiceModel
-    utilities::Vector{<:DCMExpression}
-    data::DataFrame
-    parameters::Dict
-    availability::Vector{<:AbstractVector{Bool}}
+LogitModel
 
 Data structure for multinomial logit models.
 
@@ -60,6 +56,41 @@ function LogitModel(
     return LogitModel(utilities, data, parameters, availability)
 end
 
+"""
+function logit_prob(utilities::Vector{<:DCMExpression}, data::DataFrame,
+    params::Dict{Symbol, <:Real}, availability::Vector{<:AbstractVector{Bool}})
+
+Computes choice probabilities for the Multinomial Logit model.
+
+# Arguments
+
+* `utilities`: vector of symbolic utility expressions (one per alternative)
+* `data`: DataFrame of input data
+* `params`: parameter dictionary with values for evaluation
+* `availability`: vector of boolean vectors indicating available alternatives
+
+# Returns
+
+A vector of vectors, each inner vector representing choice probabilities for each alternative per observation.
+"""
+function logit_prob(
+    utilities::Vector{<:DCMExpression},
+    data::DataFrame,
+    params::Dict{Symbol, <:Real},
+    availability::Vector{<:AbstractVector{Bool}}
+)
+    Nalts = length(utilities)
+
+    utils = [evaluate(U, data, params) for U in utilities]  # Vector of vectors
+    
+    exp_utils = [exp.(u) for u in utils]                    # Element-wise exp
+    for j in 1:Nalts
+        exp_utils[j] = [avail ? exp(u) : 0.0 for (u, avail) in zip(utils[j], availability[j])]
+    end
+
+    denom = reduce(+, exp_utils)                            # Vector: denominator for each observation
+    return [eu ./ denom for eu in exp_utils]                # Vector of choice probability vectors
+end
 
 """
 function predict(model::LogitModel)
@@ -204,7 +235,6 @@ function estimate(model::LogitModel, choicevar; verbose = true)
 
     function objective(θ)
         updated = update_model(model, θ, free_names, fixed_names, init_values)
-
         return -loglikelihood(updated, choices)
     end
 
