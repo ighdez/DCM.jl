@@ -36,40 +36,6 @@ struct MixedLogitModel <: DiscreteChoiceModel
 end
 
 """
-    collect_draws(expr::DCMExpression)
-
-    Recursively traverses a DCMExpression and returns all Draw objects it contains.
-
-    # Arguments
-    - `expr`: a symbolic utility expression
-
-    # Returns
-    - Vector of `Draw` nodes used in the expression
-"""
-function collect_draws(expr::DCMExpression)
-    nodes = DCMDraw[]
-
-    if expr isa DCMDraw
-        push!(nodes, expr)
-
-    elseif expr isa DCMSum || expr isa DCMMult
-        append!(nodes, collect_draws(expr.left))
-        append!(nodes, collect_draws(expr.right))
-
-    elseif expr isa DCMExp || expr isa DCMMinus
-        append!(nodes, collect_draws(expr.arg))
-
-    elseif expr isa DCMEqual
-        append!(nodes, collect_draws(expr.left))
-        # omit right (it's a Real)
-
-    end
-
-    return nodes
-end
-
-
-"""
     MixedLogitModel(utilities; data, availability, parameters, R, draw_scheme)
 
     Constructs a `MixedLogitModel` object from symbolic utility expressions. It automatically detects
@@ -89,7 +55,6 @@ end
     # Returns
     - `MixedLogitModel`: A model object ready for estimation or prediction.
 """
-
 function MixedLogitModel(
     utilities::Vector{<:DCMExpression};
     data::DataFrame,
@@ -99,28 +64,40 @@ function MixedLogitModel(
     draw_scheme::Symbol = :normal,
     R::Int = 100
 )
+
+    # 0. Ensure IDs are sorted
+    @assert issorted(id) "The vector `id` must be sorted to ensure consistent draw assignment."
+
     # 1. Collect all Draw objects in the utility expressions
-    draw_symbols = Set{Symbol}()
-    for u in utilities
-        for node in collect_draws(u)
-            if node isa DCMDraw
-                push!(draw_symbols, node.name)
-            end
-        end
-    end
+    draw_symbols = unique(reduce(vcat, [collect_draws(u) for u in utilities]))
 
-    # 2. Generate all draws using external Draws.jl infrastructure
+    # 2. : Identify unique individuals
+    individuals = unique(id)
+    N_individuals = length(individuals)
+    
+    # 3. Generate all draws per individual using external Draws.jl infrastructure
+    draw_struct = generate_draws(draw_symbols, N_individuals, R; scheme=draw_scheme)
+    raw_draws = Dict(s => draw_struct.values[s] for s in draw_symbols)
+
+    # 4. Expand draws to observation level
+    id_index_map = Dict(pid => idx for (idx, pid) in enumerate(individuals))
     N = nrow(data)
-    draw_struct = generate_draws(collect(draw_symbols), N, R; scheme=draw_scheme)
-    draws = Dict(s => draw_struct.values[s] for s in keys(draw_struct.values))
-
+    expanded_draws = Dict{Symbol, Matrix{Float64}}()
+    for (param, matrix) in raw_draws
+        param_draws = zeros(N, R)
+        for (i, pid) in enumerate(id)
+            param_draws[i, :] .= matrix[id_index_map[pid], :]
+        end
+        expanded_draws[param] = param_draws
+    end
+    # 5. Build and return the model
     return MixedLogitModel(
         utilities,
         data,
         id,
         availability,
         parameters,
-        draws,
+        expanded_draws,
         draw_scheme,
         R
     )
@@ -134,71 +111,45 @@ end
     # Returns
     - Matrix{Float64} of size (N, J): Simulated choice probabilities.
 """
+
 function logit_prob(
     utilities::Vector{<:DCMExpression},
     data::DataFrame,
-    parameters::Dict,
     availability::Vector{<:AbstractVector{Bool}},
+    parameters::Dict,
     draws::Dict,
     R::Int,
-    id::Vector{Int}
 )
     N = nrow(data)
     J = length(utilities)
 
-    # Obtener IDs únicos y crear índice
-    unique_ids = unique(id)
-    I = length(unique_ids)
+    # Evaluate utility for each alternative -> utils[j] is N x R
+    utils = [evaluate(u, data, parameters, draws) for u in utilities]
 
-    # Validar que la dimensión de draws sea consistente
-    # @assert I == size(draws[first(keys(draws))], 1) "Mismatch en número de individuos"
+    # Initialize 3D tensor: (N, R, J)
+    T = eltype(first(utils))
+    U = Array{T, 3}(undef, N, R, J)
 
-    # Map de ID a índice
-    id_index_map = Dict(pid => idx for (idx, pid) in enumerate(unique_ids))
-
-    # Expandir draws a nivel de observación
-    expanded_draws = Dict{Symbol, Matrix{Float64}}()
-    for (param, matrix) in draws
-        _, R_check = size(matrix)
-        @assert R == R_check "Mismatch en número de draws"
-        param_draws = zeros(N, R)
-        for (row_idx, pid) in enumerate(id)
-            param_draws[row_idx, :] .= matrix[id_index_map[pid], :]
-        end
-        expanded_draws[param] = param_draws
-    end
-
-    # Evaluar utilidades con draws expandidos
-    utils = [evaluate(u, data, parameters, expanded_draws) for u in utilities]
-
-    # Convertir a array 3D: N×R×J
-    U = Array{eltype(utils[1]), 3}(undef, N, R, J)
     for j in 1:J
-        U[:, :, j] .= utils[j]
+        U[:, :, j] .= utils[j]  # Each slice is utility of alt j across obs x draws
     end
 
-    # Aplicar exp a alternativas disponibles
-    expU = exp.(clamp.(U, -700, 700))  # previene overflow
+    # Compute exp(U), applying availability constraints and failsafe
+    expU = exp.(clamp.(U, -700, 700))  # Avoid overflow
     for j in 1:J, n in 1:N
         if !availability[j][n]
             expU[n, :, j] .= 0.0
         end
     end
 
-    # Denominador: suma sobre alternativas
+    # Compute denominator and normalize
     denom = sum(expU, dims=3)
-    denom .= max.(denom, 1e-300)  # failsafe
+    denom .= max.(denom, 1e-300)  # Numerical failsafe
 
-    # Probabilidades condicionales
-    probs_nrj = expU ./ denom
+    probs_nrj = expU ./ denom  # (N, R, J)
+    return probs_nrj
 
-    # Promediar sobre draws
-    probs = dropdims(mean(probs_nrj, dims=2), dims=2)
-    probs .= max.(probs, 1e-300)
-
-    return probs
 end
-
 
 """
     predict(model::MixedLogitModel)
@@ -212,11 +163,10 @@ function predict(model::MixedLogitModel)
     return logit_prob(
         model.utilities,
         model.data,
-        model.parameters,
         model.availability,
+        model.parameters,
         model.draws,
         model.R,
-        model.id
     )
 end
 
@@ -233,15 +183,14 @@ end
     - Matrix{Float64} of size (N, J): Simulated choice probabilities
 """
 function predict(model::MixedLogitModel, results)
-    return hcat(logit_prob(
+    return logit_prob(
         model.utilities,
         model.data,
-        results.parameters,
         model.availability,
+        results.parameters,
         model.draws,
         model.R,
-        model.id
-    ))
+    )
 end
 
 """
@@ -257,14 +206,43 @@ end
     - Total log-likelihood value (Float64)
 """
 function loglikelihood(model::MixedLogitModel, choices::Vector{Int})
-    probs = predict(model)  # Matrix N x J
-    loglik = 0.0
-    N = length(choices)
-    for n in 1:N
+    probs = logit_prob(
+        model.utilities,
+        model.data,
+        model.availability,
+        model.parameters,
+        model.draws,
+        model.R
+    )
+
+    N, R, _ = size(probs)
+
+    # Unique individuals and ID map
+    unique_ids = unique(model.id)
+    I = length(unique_ids)
+    id_map = Dict(pid => i for (i, pid) in enumerate(unique_ids))
+
+    # Initialize simulated probability matrix: R x I
+    T = eltype(probs)
+    indiv_prob = ones(T, R, I)
+    # indiv_prob = ones(R, I)
+
+    # Multiply probabilities of chosen alternatives across observations for each individual and draw
+    @inbounds for n in 1:N
         chosen = choices[n]
-        p = probs[n, chosen]
-        loglik += log(p)  # failsafe para evitar log(0)
+        i = id_map[model.id[n]]
+        for r in 1:R
+            indiv_prob[r, i] *= probs[n, r, chosen]
+        end
     end
+
+    # Average over draws and compute log-likelihood
+    loglik = 0.0
+    for i in 1:I
+        mean_prob = mean(indiv_prob[:, i])
+        loglik += log(max(mean_prob, 1e-300))  # failsafe
+    end
+
     return loglik
 end
 
@@ -293,13 +271,14 @@ function update_model(model::MixedLogitModel, θ, free_names, fixed_names, init_
     end
 
     return MixedLogitModel(
-        model.utilities;
-        data=model.data,
-        parameters=full_values,
-        availability=model.availability,
-        R=model.R,
-        draw_scheme=model.draw_scheme,
-        id=model.id
+        model.utilities,
+        model.data,
+        model.id,
+        model.availability,
+        full_values,
+        model.draws,
+        model.draw_scheme,
+        model.R
     )
 end
 

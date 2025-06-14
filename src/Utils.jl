@@ -35,25 +35,52 @@ function collect_parameters(utilities::Vector{<:DCMExpression})
     end
     return collect(values(seen))
 end
-function collect_parameters(expr::DCMExpression)
-    if expr isa DCMParameter
-        return [expr]
-    elseif expr isa DCMBinary
-        return collect_parameters(expr.left) ∪ collect_parameters(expr.right)
+
+# function collect_parameters(expr::DCMExpression)
+#     if expr isa DCMParameter
+#         return [expr]
+#     elseif expr isa DCMBinary
+#         return collect_parameters(expr.left) ∪ collect_parameters(expr.right)
+#     elseif expr isa DCMUnary
+#         return collect_parameters(expr.arg)
+#     else
+#         return []
+#     end
+# end
+
+"""
+    collect_draws(expr::DCMExpression) -> Vector{Symbol}
+
+Recursively collects all unique draw names (`Symbol`) from a utility expression tree.
+
+This function traverses any expression involving `DCMDraw` nodes (i.e., placeholders
+for random draws) and returns a vector of the names of these draws, with duplicates removed.
+
+This is typically used when building a `MixedLogitModel`, to determine which draws
+need to be generated for estimation or simulation.
+
+# Arguments
+- `expr`: A `DCMExpression`, such as a utility function involving random parameters.
+
+# Returns
+- A `Vector{Symbol}` with the names of all unique `DCMDraw` objects found in the expression.
+"""
+function collect_draws(expr::DCMExpression)
+    return unique(_collect_draws(expr))
+end
+
+function _collect_draws(expr::DCMExpression)::Vector{Symbol}
+    if expr isa DCMDraw
+        return [expr.name]  # Retorna el nombre (como símbolo)
     elseif expr isa DCMUnary
-        return collect_parameters(expr.arg)
+        return _collect_draws(expr.arg)
+    elseif expr isa DCMBinary
+        return vcat(_collect_draws(expr.left), _collect_draws(expr.right))
     else
-        return []
+        return Symbol[]
     end
 end
 
-# function collect_parameters(exprs::Vector{<:DCMExpression})
-#     params = Dict{Symbol, Real}()
-#     for expr in exprs
-#         merge!(params, collect_parameters(expr))
-#     end
-#     return params
-# end
 """
 function summarize_results(results)
 

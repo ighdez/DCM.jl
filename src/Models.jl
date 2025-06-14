@@ -9,11 +9,11 @@ function predict(model::DiscreteChoiceModel)
     error("predict not implemented for $(typeof(model))")
 end
 
-function loglikelihood(model::DiscreteChoiceModel, choices::Vector{Int})
+function loglikelihood(model::DiscreteChoiceModel, choices)
     error("loglikelihood not implemented for $(typeof(model))")
 end
 
-function update_model(model::DiscreteChoiceModel, θ::Vector{Float64}, free_names, fixed_names, init_values)
+function update_model(model::DiscreteChoiceModel, θ, free_names, fixed_names, init_values)
     error("update_model not implemented for $(typeof(model))")
 end
 

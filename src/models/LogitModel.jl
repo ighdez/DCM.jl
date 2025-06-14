@@ -79,17 +79,22 @@ function logit_prob(
     params::Dict{Symbol, <:Real},
     availability::Vector{<:AbstractVector{Bool}}
 )
-    Nalts = length(utilities)
-
-    utils = [evaluate(U, data, params) for U in utilities]  # Vector of vectors
+    N = nrow(data)         # Number of observations
+    J = length(utilities)  # Number of alternatives
     
-    exp_utils = [exp.(u) for u in utils]                    # Element-wise exp
-    for j in 1:Nalts
-        exp_utils[j] = [avail ? exp(u) : 0.0 for (u, avail) in zip(utils[j], availability[j])]
+    utils = [evaluate(U, data, params) for U in utilities]  # Vector of vectors (N × J)
+    exp_utils = [similar(u) for u in utils]                 # Initialize exp_utils
+    
+    # Loop among alts and obs, applying availability conditions if needed
+    @inbounds for j in 1:J
+        @inbounds for n in 1:N
+            exp_utils[j][n] = availability[j][n] ? exp(utils[j][n]) : 0.0
+        end
     end
 
     denom = reduce(+, exp_utils)                            # Vector: denominator for each observation
-    return [eu ./ denom for eu in exp_utils]                # Vector of choice probability vectors
+    probs = [eu ./ denom for eu in exp_utils]                # Vector of choice probability vectors
+    return probs
 end
 
 """
@@ -155,7 +160,6 @@ function loglikelihood(model::LogitModel, choices::Vector{Int})
     end
     return loglik
 end
-
 
 """
 function update_model(model::LogitModel, θ, free_names, fixed_names, init_values)

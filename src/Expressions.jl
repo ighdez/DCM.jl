@@ -160,8 +160,8 @@ function evaluate(expr::DCMExpression, data::DataFrame, params::Dict{Symbol, <:R
     elseif expr isa DCMExp
         return exp.(evaluate(expr.arg, data, params))
     elseif expr isa DCMEqual
-        left_val = evaluate(expr.left, data, params)
-        return Float64.(left_val .== expr.right)
+        left_val = evaluate(expr.left, data, params, draws)
+        return ifelse.(left_val .== expr.right, one(eltype(left_val)), zero(eltype(left_val)))
     elseif expr isa DCMMinus
         return -evaluate(expr.arg, data, params)
     else
@@ -197,10 +197,10 @@ function evaluate(expr::DCMExpression, data::DataFrame, params::AbstractDict, dr
     elseif expr isa DCMExp
         return exp.(evaluate(expr.arg, data, params, draws))
     elseif expr isa DCMEqual
-        left_val = evaluate(expr.left, data, params, draws)
-        return Float64.(left_val .== expr.right)
-        elseif expr isa DCMMinus
-    return -evaluate(expr.arg, data, params, draws)
+        left_val = evaluate(expr.left, data, params)
+        return ifelse.(left_val .== expr.right, one(eltype(left_val)), zero(eltype(left_val)))
+    elseif expr isa DCMMinus
+        return -evaluate(expr.arg, data, params, draws)
     else
         error("Unknown expression type")
     end

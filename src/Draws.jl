@@ -53,12 +53,13 @@ end
 
 # Halton sequence generator (using Sobol as a placeholder or to be replaced)
 function halton_sequence(N::Int, R::Int, pname::Symbol)
-    sobol = SobolSeq(R)
-    draws = zeros(N, R)
-    for i in 1:N
-        draws[i, :] .= 2 .* rand(sobol) .- 1
-    end
-    return draws
+    error("Halton draws are not yet implemented")
+    # sobol = SobolSeq(R)
+    # draws = zeros(N, R)
+    # for i in 1:N
+    #     draws[i, :] .= 2 .* rand(sobol) .- 1
+    # end
+    # return draws
 end
 
 # Modified Latin Hypercube Sampling (simplified)
