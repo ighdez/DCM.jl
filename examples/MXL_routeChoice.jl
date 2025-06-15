@@ -5,17 +5,17 @@ using DCM
 df = CSV.read("../data/apollo_swissRouteChoiceData.csv", DataFrame)
 
 # Define parameters for lognormal random coefficients
-mu_tt     = Parameter(:mu_tt, value=-2)
-sigma_tt  = Parameter(:sigma_tt, value=0.001)
+mu_tt     = Parameter(:mu_tt, value=-3)
+sigma_tt  = Parameter(:sigma_tt, value=0.01)
 
-mu_tc     = Parameter(:mu_tc, value=-2)
-sigma_tc  = Parameter(:sigma_tc, value=0.001)
+mu_tc     = Parameter(:mu_tc, value=-3)
+sigma_tc  = Parameter(:sigma_tc, value=0.01)
 
-mu_hw     = Parameter(:mu_hw, value=-2)
-sigma_hw  = Parameter(:sigma_hw, value=0.001)
+mu_hw     = Parameter(:mu_hw, value=-3)
+sigma_hw  = Parameter(:sigma_hw, value=0.01)
 
-mu_ch     = Parameter(:mu_ch, value=-2)
-sigma_ch  = Parameter(:sigma_ch, value=0.001)
+mu_ch     = Parameter(:mu_ch, value=-3)
+sigma_ch  = Parameter(:sigma_ch, value=0.01)
 
 # Define variables
 tt = Draw(:tt)  # draw for travel time
@@ -42,27 +42,10 @@ availability = [
 ]
 
 # Build and estimate the Mixed Logit model
-model = MixedLogitModel(utilities; data=df, id=df.ID, availability=availability, R=500, draw_scheme=:uniform)
-params = collect_parameters(model.utilities)
-for p in params
-    println("Name: ", p.name, ", Value: ", p.value)
-end
-
-# params = Dict(
-#     :mu_tt    => -2.0,
-#     :sigma_tt => 0.001,
-#     :mu_tc    => -2.0,
-#     :sigma_tc => 0.001,
-#     :mu_hw    => -2.0,
-#     :sigma_hw => 0.001,
-#     :mu_ch    => -2.0,
-#     :sigma_ch => 0.001
-# )
-
-# model = MixedLogitModel(utilities; data=df, id=df.ID, availability=availability, parameters = params, R=500, draw_scheme=:uniform)
-# @show loglikelihood(model, df.choice)
-# exit()
+model = MixedLogitModel(utilities; data=df, id=df.ID, availability=availability, R=100, draw_scheme=:mlhs)
 results = estimate(model, df.choice)
+
+@show results
 
 # Output results
 summarize_results(results)

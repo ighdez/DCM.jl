@@ -336,7 +336,9 @@ function estimate(model::MixedLogitModel, choicevar; verbose = true)
         objective,
         θ0,
         Optim.BFGS(),
-        Optim.Options(show_trace = verbose, iterations = 1000);
+        Optim.Options(
+            show_trace = verbose,
+            iterations = 1000);
         autodiff = :forward
     )
 
@@ -359,7 +361,7 @@ function estimate(model::MixedLogitModel, choicevar; verbose = true)
     end
 
     H = ForwardDiff.hessian(objective, θ̂)
-    vcov = inv(H)
+    vcov = pinv(H)
     std_errors = sqrt.(diag(vcov))
     t_end = time()
 

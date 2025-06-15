@@ -65,8 +65,8 @@ end
 # Modified Latin Hypercube Sampling (simplified)
 function mlhs_draws(N::Int, R::Int, pname::Symbol)
     draws = zeros(N, R)
-    for i in 1:N
-        for r in 1:R
+    @inbounds for i in 1:N
+        @inbounds for r in 1:R
             u = (r - 1 + rand()) / R
             draws[i, r] = quantile(Normal(), u)
         end
