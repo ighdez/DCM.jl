@@ -135,6 +135,7 @@ function logit_prob(
     end
 
     # Compute exp(U), applying availability constraints and failsafe
+    # U = clamp.(U, -20, 20)
     expU = exp.(clamp.(U, -700, 700))  # Avoid overflow
     for j in 1:J, n in 1:N
         if !availability[j][n]
@@ -224,7 +225,8 @@ function loglikelihood(model::MixedLogitModel, choices::Vector{Int})
 
     # Initialize simulated probability matrix: R x I
     T = eltype(probs)
-    indiv_prob = ones(T, R, I)
+    # indiv_prob = ones(T, R, I)
+    log_indiv_prob = zeros(T, R, I)
     # indiv_prob = ones(R, I)
 
     # Multiply probabilities of chosen alternatives across observations for each individual and draw
@@ -232,12 +234,15 @@ function loglikelihood(model::MixedLogitModel, choices::Vector{Int})
         chosen = choices[n]
         i = id_map[model.id[n]]
         for r in 1:R
-            indiv_prob[r, i] *= probs[n, r, chosen]
+            p = probs[n, r, chosen]
+            log_indiv_prob[r, i] += log(max(p,1e-12))
         end
     end
 
     # Average over draws and compute log-likelihood
+
     loglik = 0.0
+    indiv_prob = exp.(log_indiv_prob)
     for i in 1:I
         mean_prob = mean(indiv_prob[:, i])
         loglik += log(max(mean_prob, 1e-300))  # failsafe
@@ -361,7 +366,7 @@ function estimate(model::MixedLogitModel, choicevar; verbose = true)
     end
 
     H = ForwardDiff.hessian(objective, θ̂)
-    vcov = pinv(H)
+    vcov = inv(H)
     std_errors = sqrt.(diag(vcov))
     t_end = time()
 
