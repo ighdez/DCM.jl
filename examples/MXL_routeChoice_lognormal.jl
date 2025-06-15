@@ -6,12 +6,12 @@ df = CSV.read("../data/apollo_swissRouteChoiceData.csv", DataFrame)
 df = sort(df, :ID)
 
 # Scale
-df.tt1 ./= 60
-df.tt2 ./= 60
-df.hw1 ./= 60
-df.hw2 ./= 60
-df.tc1 ./= 10
-df.tc2 ./= 10
+# df.tt1 ./= 60
+# df.tt2 ./= 60
+# df.hw1 ./= 60
+# df.hw2 ./= 60
+# df.tc1 ./= 10
+# df.tc2 ./= 10
 
 # Define parameters for lognormal random coefficients
 mu_tt     = Parameter(:mu_tt, value=-3)

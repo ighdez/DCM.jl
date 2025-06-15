@@ -158,7 +158,7 @@ function evaluate(expr::DCMExpression, data::DataFrame, params::Dict{Symbol, <:R
     elseif expr isa DCMMult
         return evaluate(expr.left, data, params) .* evaluate(expr.right, data, params)
     elseif expr isa DCMExp
-        return exp.(evaluate(expr.arg, data, params))
+        return exp.(clamp.(evaluate(expr.arg, data, params),-100.0,100.0))
     elseif expr isa DCMEqual
         left_val = evaluate(expr.left, data, params)
         return ifelse.(left_val .== expr.right, one(eltype(left_val)), zero(eltype(left_val)))
@@ -195,7 +195,7 @@ function evaluate(expr::DCMExpression, data::DataFrame, params::AbstractDict, dr
     elseif expr isa DCMMult
         return evaluate(expr.left, data, params, draws) .* evaluate(expr.right, data, params, draws)
     elseif expr isa DCMExp
-        return exp.(evaluate(expr.arg, data, params, draws))
+        return exp.(clamp.(evaluate(expr.arg, data, params, draws),-100.0,100.0))
     elseif expr isa DCMEqual
         left_val = evaluate(expr.left, data, params, draws)
         return ifelse.(left_val .== expr.right, one(eltype(left_val)), zero(eltype(left_val)))
