@@ -179,28 +179,29 @@ Extended evaluate function for symbolic expressions using draws.
 
 Returns a Matrix{Float64} of size NxR
 """
-function evaluate(expr::DCMExpression, data::DataFrame, params::AbstractDict, draws::AbstractDict)
+function evaluate(expr::DCMExpression, data::DataFrame, params::AbstractDict, draws::AbstractDict, expanded_vars::AbstractDict)
     N = nrow(data)
     R = size(first(values(draws)), 2)
 
     if expr isa DCMParameter
         return fill(params[expr.name], N, R)
     elseif expr isa DCMVariable
-        col = data[:, expr.name]
-        return repeat(reshape(col, N, 1), 1, R)
+        return expanded_vars[expr.name]
     elseif expr isa DCMDraw
         return draws[expr.name]
     elseif expr isa DCMSum
-        return evaluate(expr.left, data, params, draws) .+ evaluate(expr.right, data, params, draws)
+        return evaluate(expr.left, data, params, draws, expanded_vars) .+
+               evaluate(expr.right, data, params, draws, expanded_vars)
     elseif expr isa DCMMult
-        return evaluate(expr.left, data, params, draws) .* evaluate(expr.right, data, params, draws)
+        return evaluate(expr.left, data, params, draws, expanded_vars) .*
+               evaluate(expr.right, data, params, draws, expanded_vars)
     elseif expr isa DCMExp
-        return exp.(clamp.(evaluate(expr.arg, data, params, draws),-100.0,100.0))
+        return exp.(clamp.(evaluate(expr.arg, data, params, draws, expanded_vars),-100.0,100.0))
     elseif expr isa DCMEqual
-        left_val = evaluate(expr.left, data, params, draws)
+        left_val = evaluate(expr.left, data, params, draws, expanded_vars)
         return ifelse.(left_val .== expr.right, one(eltype(left_val)), zero(eltype(left_val)))
     elseif expr isa DCMMinus
-        return -evaluate(expr.arg, data, params, draws)
+        return -evaluate(expr.arg, data, params, draws, expanded_vars)
     else
         error("Unknown expression type")
     end

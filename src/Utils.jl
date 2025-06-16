@@ -36,17 +36,24 @@ function collect_parameters(utilities::Vector{<:DCMExpression})
     return collect(values(seen))
 end
 
-# function collect_parameters(expr::DCMExpression)
-#     if expr isa DCMParameter
-#         return [expr]
-#     elseif expr isa DCMBinary
-#         return collect_parameters(expr.left) ∪ collect_parameters(expr.right)
-#     elseif expr isa DCMUnary
-#         return collect_parameters(expr.arg)
-#     else
-#         return []
-#     end
-# end
+function collect_variables(utilities::Vector{<:DCMExpression})
+    seen = Dict{Symbol, Bool}()
+    function visit(expr)
+        if expr isa DCMVariable
+            seen[expr.name] = true
+        elseif expr isa DCMBinary
+            visit(expr.left)
+            visit(expr.right)
+        elseif expr isa DCMUnary
+            visit(expr.arg)
+        end
+    end
+    for u in utilities
+        visit(u)
+    end
+    return collect(keys(seen))
+end
+
 
 """
     collect_draws(expr::DCMExpression) -> Vector{Symbol}
@@ -65,20 +72,22 @@ need to be generated for estimation or simulation.
 # Returns
 - A `Vector{Symbol}` with the names of all unique `DCMDraw` objects found in the expression.
 """
-function collect_draws(expr::DCMExpression)
-    return unique(_collect_draws(expr))
-end
-
-function _collect_draws(expr::DCMExpression)::Vector{Symbol}
-    if expr isa DCMDraw
-        return [expr.name]  # Retorna el nombre (como símbolo)
-    elseif expr isa DCMUnary
-        return _collect_draws(expr.arg)
-    elseif expr isa DCMBinary
-        return vcat(_collect_draws(expr.left), _collect_draws(expr.right))
-    else
-        return Symbol[]
+function collect_draws(utilities::Vector{<:DCMExpression})
+    seen = Dict{Symbol, Bool}()
+    function visit(expr)
+        if expr isa DCMDraw
+            seen[expr.name] = true
+        elseif expr isa DCMBinary
+            visit(expr.left)
+            visit(expr.right)
+        elseif expr isa DCMUnary
+            visit(expr.arg)
+        end
     end
+    for u in utilities
+        visit(u)
+    end
+    return collect(keys(seen))
 end
 
 """

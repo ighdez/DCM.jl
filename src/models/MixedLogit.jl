@@ -25,14 +25,15 @@ using DataFrames, StatsBase
 """
 
 struct MixedLogitModel <: DiscreteChoiceModel
-    utilities::Vector{DCMExpression}          # Utility expressions V_j
-    data::DataFrame                           # Dataset
-    id::Vector{Int}                           # ID
-    availability::Vector{Vector{Bool}}        # Alternative availability
-    parameters::Dict                          # Initial parameter values (mu, sigma, etc.)
-    draws::Dict                               # Draws: N x R
-    draw_scheme::Symbol                       # :normal, :uniform, :mlhs, etc.
-    R::Int                                    # Number of simulations (draws)
+    utilities::Vector{DCMExpression}                # Utility expressions V_j
+    data::DataFrame                                 # Dataset
+    id::Vector{Int}                                 # ID
+    availability::Vector{Vector{Bool}}              # Alternative availability
+    parameters::Dict                                # Initial parameter values (mu, sigma, etc.)
+    draws::Dict                                     # Draws: N x R
+    draw_scheme::Symbol                             # :normal, :uniform, :mlhs, etc.
+    R::Int                                          # Number of simulations (draws)
+    expanded_vars::Dict                             # Expanded variables
 end
 
 """
@@ -69,7 +70,8 @@ function MixedLogitModel(
     @assert issorted(id) "The vector `id` must be sorted to ensure consistent draw assignment."
 
     # 1. Collect all Draw objects in the utility expressions
-    draw_symbols = unique(reduce(vcat, [collect_draws(u) for u in utilities]))
+    draw_symbols = collect_draws(utilities)
+    variable_symbols = collect_variables(utilities)
 
     # 2. : Identify unique individuals
     individuals = unique(id)
@@ -90,6 +92,14 @@ function MixedLogitModel(
         end
         expanded_draws[param] = param_draws
     end
+
+    # 5. Expand variables
+    expanded_vars = Dict{Symbol, Matrix{Float64}}()
+    for var in variable_symbols
+        col = data[:, var]
+        expanded_vars[var] = repeat(reshape(col, N, 1), 1, R)
+    end
+
     # 5. Build and return the model
     return MixedLogitModel(
         utilities,
@@ -99,7 +109,8 @@ function MixedLogitModel(
         parameters,
         expanded_draws,
         draw_scheme,
-        R
+        R,
+        expanded_vars
     )
 end
 
@@ -118,13 +129,14 @@ function logit_prob(
     availability::Vector{<:AbstractVector{Bool}},
     parameters::Dict,
     draws::Dict,
+    expanded_vars::Dict,
     R::Int,
 )
     N = nrow(data)
     J = length(utilities)
 
     # Evaluate utility for each alternative -> utils[j] is N x R
-    utils = [evaluate(u, data, parameters, draws) for u in utilities]
+    utils = [evaluate(u, data, parameters, draws, expanded_vars) for u in utilities]
 
     # Initialize 3D tensor: (N, R, J)
     T = eltype(first(utils))
@@ -167,6 +179,7 @@ function predict(model::MixedLogitModel)
         model.availability,
         model.parameters,
         model.draws,
+        model.expanded_vars,
         model.R,
     )
 end
@@ -190,6 +203,7 @@ function predict(model::MixedLogitModel, results)
         model.availability,
         results.parameters,
         model.draws,
+        model.expanded_vars,
         model.R,
     )
 end
@@ -213,6 +227,7 @@ function loglikelihood(model::MixedLogitModel, choices::Vector{Int})
         model.availability,
         model.parameters,
         model.draws,
+        model.expanded_vars,
         model.R
     )
 
@@ -283,7 +298,8 @@ function update_model(model::MixedLogitModel, θ, free_names, fixed_names, init_
         full_values,
         model.draws,
         model.draw_scheme,
-        model.R
+        model.R,
+        model.expanded_vars
     )
 end
 
@@ -343,7 +359,9 @@ function estimate(model::MixedLogitModel, choicevar; verbose = true)
         Optim.BFGS(),
         Optim.Options(
             show_trace = verbose,
-            iterations = 1000);
+            iterations = 1000,
+            f_abstol=1e-6,
+            g_abstol=1e-8);
         autodiff = :forward
     )
 
