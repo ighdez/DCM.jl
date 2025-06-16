@@ -38,7 +38,7 @@ function generate_draws(param_names::Vector{Symbol}, N::Int, R::Int; scheme::Sym
             values[pname] = rand(Uniform(-√3, √3), N, R)
 
         elseif scheme == :halton
-            values[pname] = halton_sequence(N, R, pname)
+            values[pname] = halton_draws(N, R, pname)
 
         elseif scheme == :mlhs
             values[pname] = mlhs_draws(N, R, pname)
@@ -52,24 +52,37 @@ function generate_draws(param_names::Vector{Symbol}, N::Int, R::Int; scheme::Sym
 end
 
 # Halton sequence generator (using Sobol as a placeholder or to be replaced)
-function halton_sequence(N::Int, R::Int, pname::Symbol)
-    error("Halton draws are not yet implemented")
-    # sobol = SobolSeq(R)
-    # draws = zeros(N, R)
-    # for i in 1:N
-    #     draws[i, :] .= 2 .* rand(sobol) .- 1
-    # end
-    # return draws
-end
+function halton_draws(N::Int, R::Int, pname::Symbol)
+    function halton(n, base)
+        f, r = 1.0, 0.0
+        while n > 0
+            f /= base
+            r += f * (n % base)
+            n ÷= base
+        end
+        return r
+    end
 
-# Modified Latin Hypercube Sampling (simplified)
-function mlhs_draws(N::Int, R::Int, pname::Symbol)
+    primes = Primes.primes(100)
+    index = hash(pname) % length(primes) + 1
+    base = primes[index]
+
     draws = zeros(N, R)
-    @inbounds for i in 1:N
-        @inbounds for r in 1:R
-            u = (r - 1 + rand()) / R
+    for i in 1:N
+        for r in 1:R
+            u = halton((i - 1) * R + r, base)
             draws[i, r] = quantile(Normal(), u)
         end
+    end
+    return draws
+end
+
+# Modified Latin Hypercube Sampling
+function mlhs_draws(N::Int, R::Int, pname::Symbol)
+    draws = zeros(N, R)
+    for i in 1:N
+        u = ((0:R-1) .+ rand(R)) ./ R
+        draws[i, :] .= quantile.(Normal(), u)
         shuffle!(draws[i, :])
     end
     return draws

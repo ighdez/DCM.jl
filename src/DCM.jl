@@ -47,7 +47,7 @@ MIT License
 
 module DCM
 
-using Optim, LineSearches, DataFrames, ForwardDiff, LinearAlgebra, Distributions, Printf
+using Optim, LineSearches, DataFrames, ForwardDiff, LinearAlgebra, Distributions, Printf, Base.Threads, StatsBase, Primes
 
 include("Expressions.jl")
 include("Utils.jl")

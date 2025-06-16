@@ -136,22 +136,28 @@ function logit_prob(
     J = length(utilities)
 
     # Evaluate utility for each alternative -> utils[j] is N x R
-    utils = [evaluate(u, data, parameters, draws, expanded_vars) for u in utilities]
+    utils = Vector{Matrix}(undef, J)
+    Threads.@threads for j in 1:J
+        utils[j] = evaluate(utilities[j], data, parameters, draws, expanded_vars)
+    end
+    # utils = [evaluate(u, data, parameters, draws, expanded_vars) for u in utilities]
 
     # Initialize 3D tensor: (N, R, J)
     T = eltype(first(utils))
     U = Array{T, 3}(undef, N, R, J)
 
-    for j in 1:J
+    Threads.@threads for j in 1:J
         U[:, :, j] .= utils[j]  # Each slice is utility of alt j across obs x draws
     end
 
     # Compute exp(U), applying availability constraints and failsafe
     # U = clamp.(U, -20, 20)
     expU = exp.(clamp.(U, -100.0, 100.0))  # Avoid overflow
-    for j in 1:J, n in 1:N
-        if !availability[j][n]
-            expU[n, :, j] .= 0.0
+    Threads.@threads for j in 1:J
+        for n in 1:N
+            if !availability[j][n]
+                expU[n, :, j] .= 0.0
+            end
         end
     end
 
@@ -245,7 +251,7 @@ function loglikelihood(model::MixedLogitModel, choices::Vector{Int})
     # indiv_prob = ones(R, I)
 
     # Multiply probabilities of chosen alternatives across observations for each individual and draw
-    @inbounds for n in 1:N
+    Threads.@threads for n in 1:N
         chosen = choices[n]
         i = id_map[model.id[n]]
         for r in 1:R
@@ -255,7 +261,6 @@ function loglikelihood(model::MixedLogitModel, choices::Vector{Int})
     end
 
     # Average over draws and compute log-likelihood
-
     loglik = 0.0
     indiv_prob = exp.(log_indiv_prob)
     for i in 1:I
