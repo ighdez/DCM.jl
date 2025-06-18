@@ -262,7 +262,7 @@ function loglikelihood(model::MixedLogitModel, choices::Vector{Int})
     # indiv_prob = exp.(log_indiv_prob)
     Threads.@threads for i in 1:I
         for r in 1:R
-            indiv_prob[i] += max(exp(log_indiv_prob[r,i]),1e-12)
+            indiv_prob[i] += max(exp(log_indiv_prob[r,i]),1e-100)
             # loglik[i] += log(max(indiv_prob[r,i],1e-100))
         end
         indiv_prob[i] = indiv_prob[i] / R
@@ -349,10 +349,22 @@ function estimate(model::MixedLogitModel, choicevar; verbose = true)
     # Initial guess only for free params
     θ0 = [init_values[n] for n in free_names]
 
+    mutable_struct = deepcopy(model)
+
     function objective(θ)
-        updated = update_model(model, θ, free_names, fixed_names, init_values)
-        return -loglikelihood(updated, choices)
+        for (i, name) in enumerate(free_names)
+            mutable_struct.parameters[name] = θ[i]
+        end
+        for name in fixed_names
+            mutable_struct.parameters[name] = init_values[name]
+        end
+        return -loglikelihood(mutable_struct, choices)
     end
+
+    # function objective(θ)
+    #     updated = update_model(model, θ, free_names, fixed_names, init_values)
+    #     return -loglikelihood(updated, choices)
+    # end
 
     if verbose
         println("Starting optimization routine...")
