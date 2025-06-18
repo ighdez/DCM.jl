@@ -34,6 +34,7 @@ struct MixedLogitModel <: DiscreteChoiceModel
     draw_scheme::Symbol                             # :normal, :uniform, :mlhs, etc.
     R::Int                                          # Number of simulations (draws)
     expanded_vars::Dict                             # Expanded variables
+    id_dict::Dict                                   # Unique ID dict
 end
 
 """
@@ -110,7 +111,8 @@ function MixedLogitModel(
         expanded_draws,
         draw_scheme,
         R,
-        expanded_vars
+        expanded_vars,
+        id_index_map
     )
 end
 
@@ -140,36 +142,29 @@ function logit_prob(
     Threads.@threads for j in 1:J
         utils[j] = evaluate(utilities[j], data, parameters, draws, expanded_vars)
     end
-    # utils = [evaluate(u, data, parameters, draws, expanded_vars) for u in utilities]
 
     # Initialize 3D tensor: (N, R, J)
     T = eltype(first(utils))
-    U = Array{T, 3}(undef, N, R, J)
+    expU = Array{T, 3}(undef, N, R, J)
+    s_expU = zeros(T,N,R)
+    probs = zeros(T,N,R,J)
 
-    Threads.@threads for j in 1:J
-        U[:, :, j] .= utils[j]  # Each slice is utility of alt j across obs x draws
-    end
-
-    # Compute exp(U), applying availability constraints and failsafe
-    # U = clamp.(U, -20, 20)
-    # expU = exp.(clamp.(U, -100.0, 100.0))  # Avoid overflow
-    expU = clamp.(exp.(U), 1e-30, 1e+30) # Avoid overflow
-
-    Threads.@threads for j in 1:J
-        for n in 1:N
-            if !availability[j][n]
-                expU[n, :, j] .= 0.0
+    # Loop over rows
+    Threads.@threads for n in 1:N
+        for r in 1:R
+            for j in 1:J
+                U_nrj = utils[j][n,r]
+                av_nj = availability[j][n]
+                expU[n,r,j] = av_nj ? exp(clamp(U_nrj,T(-100.0),T(100.0))) : 0
+                s_expU[n,r] += expU[n,r,j]
+            end
+            s_expU[n,r] = max(s_expU[n,r],1e-300) # Failsafe to avoid divide by zero
+            for j in 1:J
+                probs[n,r,j] = expU[n,r,j] / s_expU[n,r]
             end
         end
     end
-
-    # Compute denominator and normalize
-    denom = sum(expU, dims=3)
-    denom .= max.(denom, 1e-300)  # Numerical failsafe
-
-    probs_nrj = expU ./ denom  # (N, R, J)
-    return probs_nrj
-
+return probs
 end
 
 """
@@ -242,15 +237,15 @@ function loglikelihood(model::MixedLogitModel, choices::Vector{Int})
     N, R, _ = size(probs)
 
     # Unique individuals and ID map
-    unique_ids = unique(model.id)
-    I = length(unique_ids)
-    id_map = Dict(pid => i for (i, pid) in enumerate(unique_ids))
-
+    id_map = model.id_dict
+    I = length(id_map)
+    
     # Initialize simulated probability matrix: R x I
     T = eltype(probs)
-    # indiv_prob = ones(T, R, I)
     log_indiv_prob = zeros(T, R, I)
-    # indiv_prob = ones(R, I)
+    indiv_prob = zeros(T, I)
+    loglik = zeros(T, I)
+
 
     # Multiply probabilities of chosen alternatives across observations for each individual and draw
     Threads.@threads for n in 1:N
@@ -263,14 +258,17 @@ function loglikelihood(model::MixedLogitModel, choices::Vector{Int})
     end
 
     # Average over draws and compute log-likelihood
-    loglik = 0.0
-    indiv_prob = exp.(log_indiv_prob)
-    for i in 1:I
-        mean_prob = mean(indiv_prob[:, i])
-        loglik += log(max(mean_prob, 1e-12))  # failsafe
+    # loglik = 0.0
+    # indiv_prob = exp.(log_indiv_prob)
+    Threads.@threads for i in 1:I
+        for r in 1:R
+            indiv_prob[i] += max(exp(log_indiv_prob[r,i]),1e-12)
+            # loglik[i] += log(max(indiv_prob[r,i],1e-100))
+        end
+        indiv_prob[i] = indiv_prob[i] / R
+        loglik[i] = log(max(indiv_prob[i],1e-100))
     end
-
-    return loglik
+    return sum(loglik)
 end
 
 """
@@ -306,7 +304,8 @@ function update_model(model::MixedLogitModel, θ, free_names, fixed_names, init_
         model.draws,
         model.draw_scheme,
         model.R,
-        model.expanded_vars
+        model.expanded_vars,
+        model.id_dict
     )
 end
 
@@ -363,7 +362,7 @@ function estimate(model::MixedLogitModel, choicevar; verbose = true)
     result = Optim.optimize(
         objective,
         θ0,
-        Optim.BFGS(linesearch=LineSearches.BackTracking()),
+        Optim.BFGS(),
         Optim.Options(
             show_trace = verbose,
             iterations = 1000,
