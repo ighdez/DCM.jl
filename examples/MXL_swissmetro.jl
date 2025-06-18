@@ -33,12 +33,12 @@ s_asc_sm = Parameter(:s_asc_sm, value=1)
 d_asc_sm = Draw(:d_asc_sm)
 asc_sm = (mu_asc_sm + s_asc_sm * d_asc_sm)
 
-mu_time = Parameter(:mu_time, value=0)
+mu_time = Parameter(:mu_time, value=-1)
 s_time = Parameter(:s_time, value=1)
 d_time = Draw(:d_time)
 β_time = (mu_time + s_time * d_time)
 
-β_cost = Parameter(:β_cost, value=0)
+β_cost = Parameter(:β_cost, value=-1)
 
 # Define utility functions
 V1 = asc_train + β_time * Variable(:TRAIN_TT) + β_cost * Variable(:TRAIN_CO)

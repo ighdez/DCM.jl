@@ -152,7 +152,9 @@ function logit_prob(
 
     # Compute exp(U), applying availability constraints and failsafe
     # U = clamp.(U, -20, 20)
-    expU = exp.(clamp.(U, -100.0, 100.0))  # Avoid overflow
+    # expU = exp.(clamp.(U, -100.0, 100.0))  # Avoid overflow
+    expU = clamp.(exp.(U), 1e-30, 1e+30) # Avoid overflow
+
     Threads.@threads for j in 1:J
         for n in 1:N
             if !availability[j][n]
@@ -265,7 +267,7 @@ function loglikelihood(model::MixedLogitModel, choices::Vector{Int})
     indiv_prob = exp.(log_indiv_prob)
     for i in 1:I
         mean_prob = mean(indiv_prob[:, i])
-        loglik += log(max(mean_prob, 1e-8))  # failsafe
+        loglik += log(max(mean_prob, 1e-12))  # failsafe
     end
 
     return loglik
@@ -361,7 +363,7 @@ function estimate(model::MixedLogitModel, choicevar; verbose = true)
     result = Optim.optimize(
         objective,
         θ0,
-        Optim.BFGS(),
+        Optim.BFGS(linesearch=LineSearches.BackTracking()),
         Optim.Options(
             show_trace = verbose,
             iterations = 1000,
@@ -389,8 +391,9 @@ function estimate(model::MixedLogitModel, choicevar; verbose = true)
     end
 
     H = ForwardDiff.hessian(objective, θ̂)
-    vcov = inv(H)
-    std_errors = sqrt.(diag(vcov))
+    # H = FiniteDiff.finite_difference_hessian(objective, θ̂)
+    # vcov = pinv(H)
+    std_errors = sqrt.(diag(H \ I))
     t_end = time()
 
     se = Dict{Symbol, Real}()
