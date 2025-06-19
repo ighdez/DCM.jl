@@ -58,7 +58,7 @@ availability = [
 ]
 
 # Create model and estimate
-model = MixedLogitModel(utilities; id=df.ID, data=df, availability=availability,R = 100, draw_scheme=:mlhs)
+model = MixedLogitModel(utilities; id=df.ID, data=df, availability=availability,R = 100, draw_scheme=:normal)
 results = estimate(model, df.CHOICE)
 
 # Output results
