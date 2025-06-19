@@ -271,44 +271,6 @@ function loglikelihood(model::MixedLogitModel, choices::Vector{Int})
 end
 
 """
-    update_model(model::MixedLogitModel, θ, free_names, fixed_names, init_values)
-
-    Returns a new `MixedLogitModel` with updated parameters while preserving draws and structure.
-
-    # Arguments
-    - `model`: current `MixedLogitModel`
-    - `θ`: vector of new values for free parameters
-    - `free_names`: names of free parameters
-    - `fixed_names`: names of fixed parameters
-    - `init_values`: dictionary of all initial parameter values
-
-    # Returns
-    - Updated `MixedLogitModel` instance
-"""
-function update_model(model::MixedLogitModel, θ, free_names, fixed_names, init_values)
-    full_values = Dict{Symbol, Real}()
-    for (i, name) in enumerate(free_names)
-        full_values[name] = θ[i]
-    end
-    for name in fixed_names
-        full_values[name] = init_values[name]
-    end
-
-    return MixedLogitModel(
-        model.utilities,
-        model.data,
-        model.id,
-        model.availability,
-        full_values,
-        model.draws,
-        model.draw_scheme,
-        model.R,
-        model.expanded_vars,
-        model.id_dict
-    )
-end
-
-"""
     estimate(model::MixedLogitModel, choicevar; verbose = true)
 
     Estimates the parameters of a `MixedLogitModel` via simulated maximum likelihood using `Optim.jl`.
@@ -359,11 +321,6 @@ function estimate(model::MixedLogitModel, choicevar; verbose = true)
         end
         return -loglikelihood(mutable_struct, choices)
     end
-
-    # function objective(θ)
-    #     updated = update_model(model, θ, free_names, fixed_names, init_values)
-    #     return -loglikelihood(updated, choices)
-    # end
 
     if verbose
         println("Starting optimization routine...")

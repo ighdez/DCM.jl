@@ -151,7 +151,7 @@ Evaluates a symbolic utility expression for all observations in a DataFrame.
 
 A vector of numeric values representing the evaluated expression.
 """
-function evaluate(expr::DCMExpression, data::DataFrame, params::Dict{Symbol, <:Real})
+function evaluate(expr::DCMExpression, data::DataFrame, params::AbstractDict)
     if expr isa DCMParameter
         return fill(params[expr.name], nrow(data))
     elseif expr isa DCMVariable

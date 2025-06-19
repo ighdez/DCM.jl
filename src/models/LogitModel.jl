@@ -76,24 +76,35 @@ A vector of vectors, each inner vector representing choice probabilities for eac
 function logit_prob(
     utilities::Vector{<:DCMExpression},
     data::DataFrame,
-    params::Dict{Symbol, <:Real},
-    availability::Vector{<:AbstractVector{Bool}}
+    availability::Vector{<:AbstractVector{Bool}},
+    params::Dict
 )
     N = nrow(data)         # Number of observations
     J = length(utilities)  # Number of alternatives
     
-    utils = [evaluate(U, data, params) for U in utilities]  # Vector of vectors (N × J)
-    exp_utils = [similar(u) for u in utils]                 # Initialize exp_utils
-    
-    # Loop among alts and obs, applying availability conditions if needed
-    @inbounds for j in 1:J
-        @inbounds for n in 1:N
-            exp_utils[j][n] = availability[j][n] ? exp(utils[j][n]) : 0.0
-        end
+    utils = Vector{Vector}(undef,J)
+    Threads.@threads for j in 1:J
+        utils[j] = evaluate(utilities[j], data, params)
     end
 
-    denom = reduce(+, exp_utils)                            # Vector: denominator for each observation
-    probs = [eu ./ denom for eu in exp_utils]                # Vector of choice probability vectors
+    # Initialize matrix (N x J)
+    T = eltype(first(utils))
+    expU = zeros(T,N,J)
+    s_expU = zeros(T,N)
+    probs = zeros(T,N,J)
+    
+    # Loop over rows
+    Threads.@threads for n in 1:N
+            for j in 1:J
+                U_nj = utils[j][n]
+                av_nj = availability[j][n]
+                expU[n,j] = av_nj ? exp(U_nj) : T(0.0)
+                s_expU[n] += expU[n,j]
+            end
+            for j in 1:J
+                probs[n,j] = expU[n,j] / s_expU[n]
+            end
+        end
     return probs
 end
 
@@ -111,7 +122,7 @@ Computes predicted probabilities for each alternative using the current paramete
 A vector of vectors with choice probabilities
 """
 function predict(model::LogitModel)
-    return logit_prob(model.utilities, model.data, model.parameters, model.availability)
+    return logit_prob(model.utilities, model.data, model.availability, model.parameters)
 end
 
 
@@ -130,7 +141,7 @@ Computes predicted probabilities using estimated parameters.
 A matrix of size N x J, where N is number of observations, J number of alternatives
 """
 function predict(model::LogitModel,results)
-    probs=logit_prob(model.utilities, model.data, results.parameters, model.availability)
+    probs=logit_prob(model.utilities, model.data, model.availability, results.parameters)
     return hcat(probs...)
 end
 
@@ -150,48 +161,26 @@ Computes the log-likelihood value of the model given observed choices.
 Total log-likelihood value
 """
 function loglikelihood(model::LogitModel, choices::Vector{Int})
-    probs = predict(model)  # list of vectors: one per alternative
-    loglik = 0.0
-    N = length(choices)
-    for n in 1:N
-        chosen_alt = choices[n]
-        chosen_prob = probs[chosen_alt][n]
-        loglik += log(chosen_prob)
-    end
-    return loglik
+    probs = logit_prob(
+        model.utilities,
+        model.data,
+        model.availability,
+        model.parameters
+    )
+    N, _ = size(probs)
+
+    # Initialize probability matrix: I
+    T = eltype(probs)
+    loglik = zeros(T, N)
+
+    # Loop over observations
+    Threads.@threads for n in 1:N
+        chosen = choices[n]
+        p = probs[n, chosen]
+        loglik[n] = log(p)
+    end    
+    return sum(loglik)
 end
-
-"""
-function update_model(model::LogitModel, θ, free_names, fixed_names, init_values)
-
-Updates a LogitModel with a new set of parameter values during optimization.
-
-# Arguments
-
-* `model`: current `LogitModel`
-* `θ`: vector of values for free parameters
-* `free_names`: names of free parameters
-* `fixed_names`: names of fixed parameters
-* `init_values`: original values used to complete full parameter vector
-
-# Returns
-
-Updated `LogitModel` instance
-"""
-function update_model(model::LogitModel, θ, free_names, fixed_names, init_values)
-    full_values = Dict{Symbol, Real}()
-    for (i, name) in enumerate(free_names)
-        full_values[name] = θ[i]
-    end
-    for name in fixed_names
-        full_values[name] = init_values[name]
-    end
-    return LogitModel(model.utilities;
-        data=model.data,
-        parameters=full_values,
-        availability=model.availability)
-end
-
 
 """
 function estimate(model::LogitModel, choicevar; verbose = true)
@@ -237,9 +226,16 @@ function estimate(model::LogitModel, choicevar; verbose = true)
     # Initial guess only for free params
     θ0 = [init_values[n] for n in free_names]
 
+    mutable_struct = deepcopy(model)
+
     function objective(θ)
-        updated = update_model(model, θ, free_names, fixed_names, init_values)
-        return -loglikelihood(updated, choices)
+        for (i, name) in enumerate(free_names)
+            mutable_struct.parameters[name] = θ[i]
+        end
+        for name in fixed_names
+            mutable_struct.parameters[name] = init_values[name]
+        end
+        return -loglikelihood(mutable_struct, choices)
     end
 
     if verbose
@@ -269,7 +265,9 @@ function estimate(model::LogitModel, choicevar; verbose = true)
         println("Computing Standard Errors")
     end
 
-    H = ForwardDiff.hessian(objective, θ̂)
+    # H = ForwardDiff.hessian(objective, θ̂)
+    H = FiniteDiff.finite_difference_hessian(objective, θ̂)
+
     vcov = inv(H)
     std_errors = sqrt.(diag(vcov))
     t_end = time()
