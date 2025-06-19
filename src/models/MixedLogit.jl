@@ -155,10 +155,10 @@ function logit_prob(
             for j in 1:J
                 U_nrj = utils[j][n,r]
                 av_nj = availability[j][n]
-                expU[n,r,j] = av_nj ? exp(clamp(U_nrj,T(-100.0),T(100.0))) : 0
+                expU[n,r,j] = av_nj ? exp(clamp(U_nrj,T(-200.0),T(200.0))) : T(0)
                 s_expU[n,r] += expU[n,r,j]
             end
-            s_expU[n,r] = max(s_expU[n,r],1e-300) # Failsafe to avoid divide by zero
+            s_expU[n,r] = max(s_expU[n,r],T(1e-300)) # Failsafe to avoid divide by zero
             for j in 1:J
                 probs[n,r,j] = expU[n,r,j] / s_expU[n,r]
             end
@@ -253,7 +253,7 @@ function loglikelihood(model::MixedLogitModel, choices::Vector{Int})
         i = id_map[model.id[n]]
         for r in 1:R
             p = probs[n, r, chosen]
-            log_indiv_prob[r, i] += log(max(p,1e-12))
+            log_indiv_prob[r, i] += log(max(p,T(1e-12)))
         end
     end
 
@@ -262,11 +262,10 @@ function loglikelihood(model::MixedLogitModel, choices::Vector{Int})
     # indiv_prob = exp.(log_indiv_prob)
     Threads.@threads for i in 1:I
         for r in 1:R
-            indiv_prob[i] += max(exp(log_indiv_prob[r,i]),1e-100)
-            # loglik[i] += log(max(indiv_prob[r,i],1e-100))
+            indiv_prob[i] += max(exp(log_indiv_prob[r,i]),T(1e-12))
         end
         indiv_prob[i] = indiv_prob[i] / R
-        loglik[i] = log(max(indiv_prob[i],1e-100))
+        loglik[i] = log(max(indiv_prob[i],T(1e-12)))
     end
     return sum(loglik)
 end
@@ -369,12 +368,12 @@ function estimate(model::MixedLogitModel, choicevar; verbose = true)
     if verbose
         println("Starting optimization routine...")
     end
-
+    
     t_start = time()
     result = Optim.optimize(
         objective,
         θ0,
-        Optim.BFGS(),
+        Optim.BFGS(linesearch=LineSearches.HagerZhang()),
         Optim.Options(
             show_trace = verbose,
             iterations = 1000,
@@ -401,10 +400,12 @@ function estimate(model::MixedLogitModel, choicevar; verbose = true)
         println("Computing Standard Errors")
     end
 
-    H = ForwardDiff.hessian(objective, θ̂)
-    # H = FiniteDiff.finite_difference_hessian(objective, θ̂)
+    # H = ForwardDiff.hessian(objective, θ̂)
+    H = FiniteDiff.finite_difference_hessian(objective, θ̂)
+    # vcov = LinearAlgebra.cholesky(H) \ I
+    vcov = inv(H)
     # vcov = pinv(H)
-    std_errors = sqrt.(diag(H \ I))
+    std_errors = sqrt.(diag(vcov))
     t_end = time()
 
     se = Dict{Symbol, Real}()

@@ -197,8 +197,8 @@ function evaluate(expr::DCMExpression, data::DataFrame, params::AbstractDict, dr
                evaluate(expr.right, data, params, draws, expanded_vars)
     elseif expr isa DCMExp
         # return clamp.(exp.(evaluate(expr.arg, data, params, draws, expanded_vars)),1e-10,1e+10)
-        return exp.(clamp.(evaluate(expr.arg, data, params, draws, expanded_vars),-100.0,100.0))
-        # return exp.(evaluate(expr.arg, data, params, draws, expanded_vars))
+        # return exp.(clamp.(evaluate(expr.arg, data, params, draws, expanded_vars),-200.0,200.0))
+        return exp.(evaluate(expr.arg, data, params, draws, expanded_vars))
     elseif expr isa DCMEqual
         left_val = evaluate(expr.left, data, params, draws, expanded_vars)
         return ifelse.(left_val .== expr.right, one(eltype(left_val)), zero(eltype(left_val)))
