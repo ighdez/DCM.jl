@@ -12,6 +12,10 @@ abstract type DCMExpression end
 abstract type DCMBinary <: DCMExpression end
 abstract type DCMUnary <: DCMExpression end
 
+struct DCMLiteral <: DCMExpression
+    value::Float64
+end
+
 struct DCMEqual <: DCMBinary
     left::DCMExpression
     right::Real
@@ -63,7 +67,6 @@ struct DCMParameter <: DCMExpression
     value::Float64
     fixed::Bool
 end
-
 
 """
 function Parameter(name::Symbol; value=0.0, fixed::Bool=false)
@@ -164,6 +167,8 @@ function evaluate(expr::DCMExpression, data::DataFrame, params::Dict{Symbol, <:R
         return ifelse.(left_val .== expr.right, one(eltype(left_val)), zero(eltype(left_val)))
     elseif expr isa DCMMinus
         return -evaluate(expr.arg, data, params)
+    elseif expr isa DCMLiteral
+        return fill(expr.value, nrow(data))
     else
         error("Unknown expression type")
     end
@@ -204,9 +209,47 @@ function evaluate(expr::DCMExpression, data::DataFrame, params::AbstractDict, dr
         return ifelse.(left_val .== expr.right, one(eltype(left_val)), zero(eltype(left_val)))
     elseif expr isa DCMMinus
         return -evaluate(expr.arg, data, params, draws, expanded_vars)
+    elseif expr isa DCMLiteral
+        return fill(expr.value, N, R)
     else
         error("Unknown expression type")
     end
 end
 
-export Parameter, Variable, evaluate, Draw
+"""
+Compute the symbolic derivative of an expression with respect to a parameter.
+Returns a new DCMExpression that can be evaluated later.
+"""
+function derivative(expr::DCMExpression, param::Symbol)::DCMExpression
+    if expr isa DCMParameter
+        return expr.name == param ? DCMLiteral(1.0) : DCMLiteral(0.0)
+
+    elseif expr isa DCMVariable || expr isa DCMDraw
+        return DCMLiteral(0.0)
+
+    elseif expr isa DCMSum
+        return derivative(expr.left, param) + derivative(expr.right, param)
+
+    elseif expr isa DCMMult
+        # Product rule: d(fg) = f' * g + f * g'
+        f, g = expr.left, expr.right
+        return derivative(f, param) * g + f * derivative(g, param)
+
+    elseif expr isa DCMExp
+        # Chain rule: d(exp(f)) = exp(f) * f'
+        f = expr.arg
+        return exp(f) * derivative(f, param)
+
+    elseif expr isa DCMMinus
+        return -derivative(expr.arg, param)
+
+    elseif expr isa DCMEqual
+        # Equality is treated as constant (not differentiable wrt parameters)
+        return DCMLiteral(0.0)
+
+    else
+        error("No derivative rule implemented for expression of type $(typeof(expr))")
+    end
+end
+
+export Parameter, Variable, Draw, evaluate, derivative
