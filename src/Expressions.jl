@@ -220,7 +220,7 @@ end
 Compute the symbolic derivative of an expression with respect to a parameter.
 Returns a new DCMExpression that can be evaluated later.
 """
-function derivative(expr::DCMExpression, param::Symbol)::DCMExpression
+function derivative(expr::DCMExpression, param::Symbol)
     if expr isa DCMParameter
         return expr.name == param ? DCMLiteral(1.0) : DCMLiteral(0.0)
 
@@ -252,4 +252,4 @@ function derivative(expr::DCMExpression, param::Symbol)::DCMExpression
     end
 end
 
-export Parameter, Variable, Draw, evaluate, derivative
+export Parameter, Variable, Draw

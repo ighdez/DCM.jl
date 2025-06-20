@@ -57,16 +57,13 @@ function LogitModel(
 end
 
 """
-function logit_prob(utilities::Vector{<:DCMExpression}, data::DataFrame,
-    params::Dict{Symbol, <:Real}, availability::Vector{<:AbstractVector{Bool}})
-
 Computes choice probabilities for the Multinomial Logit model.
 
 # Arguments
 
 * `utilities`: vector of symbolic utility expressions (one per alternative)
 * `data`: DataFrame of input data
-* `params`: parameter dictionary with values for evaluation
+* `parameters`: parameter dictionary with values for evaluation
 * `availability`: vector of boolean vectors indicating available alternatives
 
 # Returns
@@ -77,14 +74,14 @@ function logit_prob(
     utilities::Vector{<:DCMExpression},
     data::DataFrame,
     availability::Vector{<:AbstractVector{Bool}},
-    params::Dict
+    parameters::Dict
 )
     N = nrow(data)         # Number of observations
     J = length(utilities)  # Number of alternatives
     
     utils = Vector{Vector}(undef,J)
     Threads.@threads for j in 1:J
-        utils[j] = evaluate(utilities[j], data, params)
+        utils[j] = evaluate(utilities[j], data, parameters)
     end
 
     # Initialize matrix (N x J)
@@ -92,7 +89,7 @@ function logit_prob(
     expU = zeros(T,N,J)
     s_expU = zeros(T,N)
     probs = zeros(T,N,J)
-    
+
     # Loop over rows
     Threads.@threads for n in 1:N
             for j in 1:J
@@ -105,6 +102,7 @@ function logit_prob(
                 probs[n,j] = expU[n,j] / s_expU[n]
             end
         end
+
     return probs
 end
 
@@ -122,7 +120,13 @@ Computes predicted probabilities for each alternative using the current paramete
 A vector of vectors with choice probabilities
 """
 function predict(model::LogitModel)
-    return logit_prob(model.utilities, model.data, model.availability, model.parameters)
+    probs = logit_prob(
+        model.utilities,
+        model.data,
+        model.availability,
+        model.parameters,
+    )
+    return probs
 end
 
 
@@ -141,8 +145,13 @@ Computes predicted probabilities using estimated parameters.
 A matrix of size N x J, where N is number of observations, J number of alternatives
 """
 function predict(model::LogitModel,results)
-    probs=logit_prob(model.utilities, model.data, model.availability, results.parameters)
-    return hcat(probs...)
+    probs = logit_prob(
+        model.utilities,
+        model.data,
+        model.availability,
+        results.parameters,
+    )
+    return probs
 end
 
 
@@ -165,12 +174,12 @@ function loglikelihood(model::LogitModel, choices::Vector{Int})
         model.utilities,
         model.data,
         model.availability,
-        model.parameters
+        model.parameters,
     )
+
     N, _ = size(probs)
 
-    # Initialize probability matrix: I
-    T = eltype(probs)
+    T = eltype(first(probs))
     loglik = zeros(T, N)
 
     # Loop over observations
@@ -178,8 +187,52 @@ function loglikelihood(model::LogitModel, choices::Vector{Int})
         chosen = choices[n]
         p = probs[n, chosen]
         loglik[n] = log(p)
-    end    
+    end
+
     return sum(loglik)
+end
+
+function gradient(model::LogitModel, choices::Vector{Int}, dU::Vector{Vector{DCMExpression}})
+    probs = logit_prob(
+        model.utilities,
+        model.data,
+        model.availability,
+        model.parameters,
+    )
+    
+    N, J = size(probs)
+    K = length(dU[1])
+
+    T = eltype(first(probs))
+    grad = zeros(T,K)
+    dU_vals = [Vector{Vector{T}}(undef, J) for _ in 1:K]
+
+    # Evaluate derivatives once
+    Threads.@threads for k in 1:K
+        for j in 1:J
+            dU_vals[k][j] = evaluate(dU[j][k], model.data, model.parameters)
+        end
+    end
+
+    # Loop over obs
+    grad_vecs = [zeros(T, N) for _ in 1:K]
+    Threads.@threads for n in 1:N
+        chosen = choices[n]
+        for k in 1:K
+            ∂U_ch = dU_vals[k][chosen][n]
+            s = zero(eltype(model.data[!,1]))
+            for j in 1:J
+                s += probs[n,j] * dU_vals[k][j][n]
+            end
+            grad_vecs[k][n] = ∂U_ch - s
+        end
+    end
+
+    for k in 1:K
+        grad[k] = sum(grad_vecs[k])
+    end
+
+    return grad
 end
 
 """
@@ -206,7 +259,11 @@ Named tuple with results, including:
 * `converged`: convergence status
 * `estimation_time`: total time in seconds
   """
-function estimate(model::LogitModel, choicevar; verbose = true)
+function estimate(
+    model::LogitModel,
+    choicevar::Vector{Int};
+    verbose::Bool = true
+)
 
     if any(ismissing, choicevar)
         error("Choice vector contains missing values. Please clean your data.")
@@ -228,14 +285,36 @@ function estimate(model::LogitModel, choicevar; verbose = true)
 
     mutable_struct = deepcopy(model)
 
-    function objective(θ)
+    # Precompute derivatives
+    dU_tmp = [[derivative(u, pname) for pname in free_names] for u in model.utilities]
+
+    # Force type
+    dU = [convert(Vector{DCMExpression}, dj) for dj in dU_tmp]
+
+    function f_obj(θ)
         for (i, name) in enumerate(free_names)
             mutable_struct.parameters[name] = θ[i]
         end
+
         for name in fixed_names
             mutable_struct.parameters[name] = init_values[name]
         end
-        return -loglikelihood(mutable_struct, choices)
+
+        loglik = loglikelihood(mutable_struct,choices)
+        return -loglik
+    end
+
+    function g_obj(θ)
+        for (i, name) in enumerate(free_names)
+            mutable_struct.parameters[name] = θ[i]
+        end
+
+        for name in fixed_names
+            mutable_struct.parameters[name] = init_values[name]
+        end
+
+        grad = gradient(mutable_struct,choices,dU)
+        return -grad
     end
 
     if verbose
@@ -243,7 +322,14 @@ function estimate(model::LogitModel, choicevar; verbose = true)
     end
 
     t_start = time()
-    result = Optim.optimize(objective, θ0, Optim.BFGS(),Optim.Options(show_trace = verbose, iterations = 1000); autodiff = :forward)
+    result = Optim.optimize(
+            f_obj,
+            g_obj,
+            θ0,
+            Optim.BFGS(),
+            Optim.Options(
+                show_trace = verbose,
+                iterations = 1000),inplace=false)
 
     if verbose & Optim.converged(result)
         println("Converged")
@@ -265,10 +351,14 @@ function estimate(model::LogitModel, choicevar; verbose = true)
         println("Computing Standard Errors")
     end
 
-    # H = ForwardDiff.hessian(objective, θ̂)
-    H = FiniteDiff.finite_difference_hessian(objective, θ̂)
+    H = FiniteDiff.finite_difference_hessian(f_obj, θ̂)
+    
+    vcov = try
+        inv(H)
+    catch
+        pinv(H)
+    end
 
-    vcov = inv(H)
     std_errors = sqrt.(diag(vcov))
     t_end = time()
 
