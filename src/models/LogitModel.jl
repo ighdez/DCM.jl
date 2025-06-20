@@ -236,38 +236,6 @@ function gradient(model::LogitModel, choices::Vector{Int}, dU::Vector{Vector{DCM
 end
 
 """
-function update_model(model::LogitModel, θ, free_names, fixed_names, init_values)
-
-Updates a LogitModel with a new set of parameter values during optimization.
-
-# Arguments
-
-* `model`: current `LogitModel`
-* `θ`: vector of values for free parameters
-* `free_names`: names of free parameters
-* `fixed_names`: names of fixed parameters
-* `init_values`: original values used to complete full parameter vector
-
-# Returns
-
-Updated `LogitModel` instance
-"""
-function update_model(model::LogitModel, θ, free_names, fixed_names, init_values)
-    full_values = Dict{Symbol, Real}()
-    for (i, name) in enumerate(free_names)
-        full_values[name] = θ[i]
-    end
-    for name in fixed_names
-        full_values[name] = init_values[name]
-    end
-    return LogitModel(model.utilities;
-        data=model.data,
-        parameters=full_values,
-        availability=model.availability)
-end
-
-
-"""
 function estimate(model::LogitModel, choicevar; verbose = true)
 
 Estimates model parameters using maximum likelihood estimation.
