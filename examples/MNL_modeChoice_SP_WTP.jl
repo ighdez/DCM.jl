@@ -1,4 +1,4 @@
-using CSV, DataFrames
+using CSV, DataFrames, Statistics
 using DCM
 
 # Load dataset and filter SP observations only

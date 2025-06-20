@@ -50,6 +50,6 @@ results = estimate(model, df.CHOICE)
 summarize_results(results)
 
 # Predict
-# preds = predict(model,results)
-# println("\nAverage of Logit predictions")
-# println(mean(preds,dims=1))
+preds = predict(model,results)
+println("\nAverage of Logit predictions")
+println(mean(preds,dims=1))

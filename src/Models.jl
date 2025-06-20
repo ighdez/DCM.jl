@@ -13,6 +13,10 @@ function loglikelihood(model::DiscreteChoiceModel, choices)
     error("loglikelihood not implemented for $(typeof(model))")
 end
 
+function gradient(model::DiscreteChoiceModel, choices, dU)
+    error("gradient not implemented for $(typeof(model))")
+end
+
 function update_model(model::DiscreteChoiceModel, θ, free_names, fixed_names, init_values)
     error("update_model not implemented for $(typeof(model))")
 end

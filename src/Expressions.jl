@@ -209,4 +209,40 @@ function evaluate(expr::DCMExpression, data::DataFrame, params::AbstractDict, dr
     end
 end
 
-export Parameter, Variable, evaluate, Draw
+"""
+Compute the symbolic derivative of an expression with respect to a parameter.
+Returns a new DCMExpression that can be evaluated later.
+"""
+function derivative(expr::DCMExpression, param::Symbol)
+    if expr isa DCMParameter
+        return expr.name == param ? DCMLiteral(1.0) : DCMLiteral(0.0)
+
+    elseif expr isa DCMVariable || expr isa DCMDraw
+        return DCMLiteral(0.0)
+
+    elseif expr isa DCMSum
+        return derivative(expr.left, param) + derivative(expr.right, param)
+
+    elseif expr isa DCMMult
+        # Product rule: d(fg) = f' * g + f * g'
+        f, g = expr.left, expr.right
+        return derivative(f, param) * g + f * derivative(g, param)
+
+    elseif expr isa DCMExp
+        # Chain rule: d(exp(f)) = exp(f) * f'
+        f = expr.arg
+        return exp(f) * derivative(f, param)
+
+    elseif expr isa DCMMinus
+        return -derivative(expr.arg, param)
+
+    elseif expr isa DCMEqual
+        # Equality is treated as constant (not differentiable wrt parameters)
+        return DCMLiteral(0.0)
+
+    else
+        error("No derivative rule implemented for expression of type $(typeof(expr))")
+    end
+end
+
+export Parameter, Variable, Draw
