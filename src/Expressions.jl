@@ -12,6 +12,10 @@ abstract type DCMExpression end
 abstract type DCMBinary <: DCMExpression end
 abstract type DCMUnary <: DCMExpression end
 
+struct DCMLiteral <: DCMExpression
+    value::Float64
+end
+
 struct DCMEqual <: DCMBinary
     left::DCMExpression
     right::Real
@@ -148,7 +152,7 @@ Evaluates a symbolic utility expression for all observations in a DataFrame.
 
 A vector of numeric values representing the evaluated expression.
 """
-function evaluate(expr::DCMExpression, data::DataFrame, params::Dict{Symbol, <:Real})
+function evaluate(expr::DCMExpression, data::DataFrame, params::AbstractDict)
     if expr isa DCMParameter
         return fill(params[expr.name], nrow(data))
     elseif expr isa DCMVariable
@@ -164,6 +168,8 @@ function evaluate(expr::DCMExpression, data::DataFrame, params::Dict{Symbol, <:R
         return ifelse.(left_val .== expr.right, one(eltype(left_val)), zero(eltype(left_val)))
     elseif expr isa DCMMinus
         return -evaluate(expr.arg, data, params)
+    elseif expr isa DCMLiteral
+        return fill(expr.value, nrow(data))
     else
         error("Unknown expression type")
     end
@@ -204,6 +210,8 @@ function evaluate(expr::DCMExpression, data::DataFrame, params::AbstractDict, dr
         return ifelse.(left_val .== expr.right, one(eltype(left_val)), zero(eltype(left_val)))
     elseif expr isa DCMMinus
         return -evaluate(expr.arg, data, params, draws, expanded_vars)
+    elseif expr isa DCMLiteral
+        return fill(expr.value, N, R)
     else
         error("Unknown expression type")
     end
