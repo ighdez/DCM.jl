@@ -24,7 +24,6 @@ A `NamedTuple` with:
 """
 function bfgsmin(
     objective::Function,
-    gradient::Function,
     x0;
     maxiter::Int=1000,
     tol::Float64=1e-06,
@@ -33,8 +32,7 @@ function bfgsmin(
 	
 	# Initialize
 	x = x0;
-	f_val = objective(x)
-    grad = gradient(x)
+	f_val, grad = objective(x)
 
     n = length(x)
 
@@ -60,8 +58,8 @@ function bfgsmin(
 		while true;
 			x_trial = x + lambda * direction
 			
-			f_trial = try
-                objective(x_trial)
+			f_trial, _  = try
+                objective(x_trial;gradients=false)
 				catch
 					NaN
 				end
@@ -80,8 +78,7 @@ function bfgsmin(
 
 		# Construct the improvement and gradient improvement
 		x_new = x + lambda * direction
-        f_new = objective(x_new)
-        grad_new = gradient(x_new)
+        f_new, grad_new = objective(x_new)
 				
         s = x_new - x
         y = grad_new - grad
