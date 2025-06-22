@@ -169,7 +169,7 @@ Computes the log-likelihood value of the model given observed choices.
 
 Total log-likelihood value
 """
-function loglikelihood(model::LogitModel, choices::Vector{Int})
+function llgrad(model::LogitModel, choices::Vector{Int}; dU::Union{Nothing,Vector{Vector{DCMExpression}}}=nothing)
     probs = logit_prob(
         model.utilities,
         model.data,
@@ -177,62 +177,52 @@ function loglikelihood(model::LogitModel, choices::Vector{Int})
         model.parameters,
     )
 
-    N, _ = size(probs)
+    N, J = size(probs)
 
     T = eltype(first(probs))
+
+    if !isnothing(dU)
+        K = length(dU[1])
+        grad = zeros(T,K)
+        grad_vecs = [zeros(T, N) for _ in 1:K]
+        dU_vals = [Vector{Vector{T}}(undef, J) for _ in 1:K]
+
+        # Evaluate derivatives once
+        Threads.@threads for k in 1:K
+            for j in 1:J
+                dU_vals[k][j] = evaluate(dU[j][k], model.data, model.parameters)
+            end
+        end
+    end
+
     loglik = zeros(T, N)
 
     # Loop over observations
     Threads.@threads for n in 1:N
         chosen = choices[n]
         p = probs[n, chosen]
-        loglik[n] = log(p)
-    end
-
-    return sum(loglik)
-end
-
-function gradient(model::LogitModel, choices::Vector{Int}, dU::Vector{Vector{DCMExpression}})
-    probs = logit_prob(
-        model.utilities,
-        model.data,
-        model.availability,
-        model.parameters,
-    )
-    
-    N, J = size(probs)
-    K = length(dU[1])
-
-    T = eltype(first(probs))
-    grad = zeros(T,K)
-    dU_vals = [Vector{Vector{T}}(undef, J) for _ in 1:K]
-
-    # Evaluate derivatives once
-    Threads.@threads for k in 1:K
-        for j in 1:J
-            dU_vals[k][j] = evaluate(dU[j][k], model.data, model.parameters)
-        end
-    end
-
-    # Loop over obs
-    grad_vecs = [zeros(T, N) for _ in 1:K]
-    Threads.@threads for n in 1:N
-        chosen = choices[n]
-        for k in 1:K
-            ∂U_ch = dU_vals[k][chosen][n]
-            s = zero(eltype(model.data[!,1]))
-            for j in 1:J
-                s += probs[n,j] * dU_vals[k][j][n]
+        if !isnothing(dU)
+            for k in 1:K
+                ∂U_ch = dU_vals[k][chosen][n]
+                s = zero(eltype(model.data[!,1]))
+                for j in 1:J
+                    s += probs[n,j] * dU_vals[k][j][n]
+                end
+                grad_vecs[k][n] = ∂U_ch - s
             end
-            grad_vecs[k][n] = ∂U_ch - s
+        else
+            loglik[n] = log(p)
         end
     end
 
-    for k in 1:K
-        grad[k] = sum(grad_vecs[k])
+    if !isnothing(dU)
+        for k in 1:K
+            grad[k] = sum(grad_vecs[k])
+        end
+        return grad
+    else
+        return sum(loglik)
     end
-
-    return grad
 end
 
 """
@@ -300,7 +290,7 @@ function estimate(
             mutable_struct.parameters[name] = init_values[name]
         end
 
-        loglik = loglikelihood(mutable_struct,choices)
+        loglik = llgrad(mutable_struct,choices)
         return -loglik
     end
 
@@ -313,7 +303,7 @@ function estimate(
             mutable_struct.parameters[name] = init_values[name]
         end
 
-        grad = gradient(mutable_struct,choices,dU)
+        grad = llgrad(mutable_struct,choices;dU)
         return -grad
     end
 
