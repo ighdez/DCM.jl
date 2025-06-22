@@ -97,7 +97,7 @@ function bfgsmin(
 
         grad_norm = abs(directional_derivative)
 
-        iterations =+ 1
+        iterations += 1
 		
         # Show information if verbose == true
         if verbose
