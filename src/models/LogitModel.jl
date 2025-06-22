@@ -186,53 +186,10 @@ function loglikelihood(model::LogitModel, choices::Vector{Int})
     Threads.@threads for n in 1:N
         chosen = choices[n]
         p = probs[n, chosen]
-        loglik[n] = log(p)
+        @inbounds loglik[n] = log(p)
     end
 
     return sum(loglik)
-end
-
-function gradient(model::LogitModel, choices::Vector{Int}, dU::Vector{Vector{DCMExpression}})
-    probs = logit_prob(
-        model.utilities,
-        model.data,
-        model.availability,
-        model.parameters,
-    )
-    
-    N, J = size(probs)
-    K = length(dU[1])
-
-    T = eltype(first(probs))
-    grad = zeros(T,K)
-    dU_vals = [Vector{Vector{T}}(undef, J) for _ in 1:K]
-
-    # Evaluate derivatives once
-    Threads.@threads for k in 1:K
-        for j in 1:J
-            dU_vals[k][j] = evaluate(dU[j][k], model.data, model.parameters)
-        end
-    end
-
-    # Loop over obs
-    grad_vecs = [zeros(T, N) for _ in 1:K]
-    Threads.@threads for n in 1:N
-        chosen = choices[n]
-        for k in 1:K
-            ∂U_ch = dU_vals[k][chosen][n]
-            s = zero(eltype(model.data[!,1]))
-            for j in 1:J
-                s += probs[n,j] * dU_vals[k][j][n]
-            end
-            grad_vecs[k][n] = ∂U_ch - s
-        end
-    end
-
-    for k in 1:K
-        grad[k] = sum(grad_vecs[k])
-    end
-
-    return grad
 end
 
 """
@@ -285,36 +242,17 @@ function estimate(
 
     mutable_struct = deepcopy(model)
 
-    # Precompute derivatives
-    dU_tmp = [[derivative(u, pname) for pname in free_names] for u in model.utilities]
-
-    # Force type
-    dU = [convert(Vector{DCMExpression}, dj) for dj in dU_tmp]
-
     function f_obj(θ)
-        for (i, name) in enumerate(free_names)
+        @inbounds for (i, name) in enumerate(free_names)
             mutable_struct.parameters[name] = θ[i]
         end
 
-        for name in fixed_names
+        @inbounds for name in fixed_names
             mutable_struct.parameters[name] = init_values[name]
         end
 
         loglik = loglikelihood(mutable_struct,choices)
         return -loglik
-    end
-
-    function g_obj(θ)
-        for (i, name) in enumerate(free_names)
-            mutable_struct.parameters[name] = θ[i]
-        end
-
-        for name in fixed_names
-            mutable_struct.parameters[name] = init_values[name]
-        end
-
-        grad = gradient(mutable_struct,choices,dU)
-        return -grad
     end
 
     if verbose
@@ -324,12 +262,11 @@ function estimate(
     t_start = time()
     result = Optim.optimize(
             f_obj,
-            g_obj,
             θ0,
             Optim.BFGS(),
             Optim.Options(
                 show_trace = verbose,
-                iterations = 1000),inplace=false)
+                iterations = 1000);autodiff=:forward)
 
     θ̂ = Optim.minimizer(result)
     estimated_params = Dict{Symbol, Real}()

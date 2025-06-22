@@ -262,58 +262,10 @@ function loglikelihood(model::MixedLogitModel, choices::Vector{Int})
         for r in 1:R
             indiv_prob[i] += max(exp(log_indiv_prob[r,i]),T(1e-12))
         end
-        indiv_prob[i] = indiv_prob[i] / R
-        loglik[i] = log(max(indiv_prob[i],T(1e-12)))
+        @inbounds indiv_prob[i] = indiv_prob[i] / R
+        @inbounds loglik[i] = log(max(indiv_prob[i],T(1e-12)))
     end
     return sum(loglik)
-end
-
-function gradient(model::MixedLogitModel, choices::Vector{Int}, dU::Vector{Vector{DCMExpression}})
-    probs = logit_prob(
-        model.utilities,
-        model.data,
-        model.availability,
-        model.parameters,
-        model.draws,
-        model.expanded_vars,
-        model.R
-    )
-
-    N, R, J = size(probs)
-    K = length(dU[1])
-
-    T = eltype(first(probs))
-    grad = zeros(T,K)
-    dU_vals = [Vector{Matrix{T}}(undef, J) for _ in 1:K]
-
-    # Evaluate derivatives once
-    Threads.@threads for k in 1:K
-        for j in 1:J
-            dU_vals[k][j] = evaluate(dU[j][k], model.data, model.parameters,model.draws,model.expanded_vars)
-        end
-    end
-
-    # Loop over obs
-    grad_vecs = [zeros(T, N, R) for _ in 1:K]
-    Threads.@threads for n in 1:N
-        chosen = choices[n]
-        for r in 1:R
-            for k in 1:K
-                ∂U_ch = dU_vals[k][chosen][n,r]
-                s = 0.0
-                for j in 1:J
-                    s += probs[n,r,j] * dU_vals[k][j][n,r]
-                end
-                grad_vecs[k][n,r] = ∂U_ch - s
-            end
-        end
-    end
-
-    Threads.@threads for k in 1:K
-        grad[k] = sum(grad_vecs[k]) / model.R
-    end
-
-    return grad
 end
 
 """
@@ -358,47 +310,18 @@ function estimate(model::MixedLogitModel, choicevar; verbose = true)
 
     mutable_struct = deepcopy(model)
 
-    # Precompute derivatives
-    dU_tmp = [[derivative(u, pname) for pname in free_names] for u in model.utilities]
-
-    # Force type
-    dU = [convert(Vector{DCMExpression}, dj) for dj in dU_tmp]
-
     function f_obj(θ)
-        for (i, name) in enumerate(free_names)
+        @inbounds for (i, name) in enumerate(free_names)
             mutable_struct.parameters[name] = θ[i]
         end
 
-        for name in fixed_names
+        @inbounds for name in fixed_names
             mutable_struct.parameters[name] = init_values[name]
         end
 
         loglik = loglikelihood(mutable_struct,choices)
         return -loglik
     end
-
-    function g_obj(θ)
-        for (i, name) in enumerate(free_names)
-            mutable_struct.parameters[name] = θ[i]
-        end
-
-        for name in fixed_names
-            mutable_struct.parameters[name] = init_values[name]
-        end
-
-        grad = gradient(mutable_struct,choices,dU)
-        return -grad
-    end
-
-    # function objective(θ)
-    #     for (i, name) in enumerate(free_names)
-    #         mutable_struct.parameters[name] = θ[i]
-    #     end
-    #     for name in fixed_names
-    #         mutable_struct.parameters[name] = init_values[name]
-    #     end
-    #     return -loglikelihood(mutable_struct, choices)
-    # end
 
     if verbose
         println("Starting optimization routine...")
@@ -407,15 +330,22 @@ function estimate(model::MixedLogitModel, choicevar; verbose = true)
     t_start = time()
     result = Optim.optimize(
         f_obj,
-        g_obj,
         θ0,
-        Optim.BFGS(linesearch=LineSearches.HagerZhang()),
-        Optim.Options(
+        Optim.BFGS(),#linesearch = LineSearches.HagerZhang(
+            # delta = 0.2,           # más conservador que 0.1
+            # sigma = 0.8,           # curvatura fuerte (evita pasos grandes)
+            # alphamax = 2.0,        # permite explorar pasos amplios (útil si gradientes son suaves)
+            # rho = 1e-10,           # mínima diferencia relativa entre pasos
+            # epsilon = 1e-6,        # precisión media (puede subir si el gradiente es ruidoso)
+            # gamma = 1e-4,          # estabilidad numérica
+            # linesearchmax = 30,    # permitir más pasos si gradiente es irregular
+            # )),
+            Optim.Options(
             show_trace = verbose,
             iterations = 1000,
             f_abstol=1e-6,
-            g_abstol=1e-8),
-        inplace=false
+            g_abstol=1e-8);
+            autodiff=:forward
     )
 
     if verbose && Optim.converged(result)
@@ -432,16 +362,22 @@ function estimate(model::MixedLogitModel, choicevar; verbose = true)
         estimated_params[name] = init_values[name]
     end
 
+    # Hessian
     if verbose
         println("Computing Standard Errors")
     end
 
-    # H = ForwardDiff.hessian(objective, θ̂)
     H = FiniteDiff.finite_difference_hessian(f_obj, θ̂)
-    # vcov = LinearAlgebra.cholesky(H) \ I
-    vcov = inv(H)
-    # vcov = pinv(H)
-    std_errors = sqrt.(diag(vcov))
+    
+    try
+        vcov = inv(H)
+        std_errors = sqrt.(diag(vcov))
+    catch
+        vcov = pinv(H)
+        std_errors = sqrt.(diag(vcov))
+    end
+    
+    # std_errors = sqrt.(diag(vcov))
     t_end = time()
 
     se = Dict{Symbol, Real}()
