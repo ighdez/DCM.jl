@@ -258,8 +258,6 @@ function loglikelihood(model::MixedLogitModel, choices::Vector{Int})
     end
 
     # Average over draws and compute log-likelihood
-    # loglik = 0.0
-    # indiv_prob = exp.(log_indiv_prob)
     Threads.@threads for i in 1:I
         for r in 1:R
             indiv_prob[i] += max(exp(log_indiv_prob[r,i]),T(1e-12))
@@ -270,42 +268,52 @@ function loglikelihood(model::MixedLogitModel, choices::Vector{Int})
     return sum(loglik)
 end
 
-"""
-    update_model(model::MixedLogitModel, θ, free_names, fixed_names, init_values)
-
-    Returns a new `MixedLogitModel` with updated parameters while preserving draws and structure.
-
-    # Arguments
-    - `model`: current `MixedLogitModel`
-    - `θ`: vector of new values for free parameters
-    - `free_names`: names of free parameters
-    - `fixed_names`: names of fixed parameters
-    - `init_values`: dictionary of all initial parameter values
-
-    # Returns
-    - Updated `MixedLogitModel` instance
-"""
-function update_model(model::MixedLogitModel, θ, free_names, fixed_names, init_values)
-    full_values = Dict{Symbol, Real}()
-    for (i, name) in enumerate(free_names)
-        full_values[name] = θ[i]
-    end
-    for name in fixed_names
-        full_values[name] = init_values[name]
-    end
-
-    return MixedLogitModel(
+function gradient(model::MixedLogitModel, choices::Vector{Int}, dU::Vector{Vector{DCMExpression}})
+    probs = logit_prob(
         model.utilities,
         model.data,
-        model.id,
         model.availability,
-        full_values,
+        model.parameters,
         model.draws,
-        model.draw_scheme,
-        model.R,
         model.expanded_vars,
-        model.id_dict
+        model.R
     )
+
+    N, R, J = size(probs)
+    K = length(dU[1])
+
+    T = eltype(first(probs))
+    grad = zeros(T,K)
+    dU_vals = [Vector{Matrix{T}}(undef, J) for _ in 1:K]
+
+    # Evaluate derivatives once
+    Threads.@threads for k in 1:K
+        for j in 1:J
+            dU_vals[k][j] = evaluate(dU[j][k], model.data, model.parameters,model.draws,model.expanded_vars)
+        end
+    end
+
+    # Loop over obs
+    grad_vecs = [zeros(T, N, R) for _ in 1:K]
+    Threads.@threads for n in 1:N
+        chosen = choices[n]
+        for r in 1:R
+            for k in 1:K
+                ∂U_ch = dU_vals[k][chosen][n,r]
+                s = 0.0
+                for j in 1:J
+                    s += probs[n,r,j] * dU_vals[k][j][n,r]
+                end
+                grad_vecs[k][n,r] = ∂U_ch - s
+            end
+        end
+    end
+
+    Threads.@threads for k in 1:K
+        grad[k] = sum(grad_vecs[k]) / model.R
+    end
+
+    return grad
 end
 
 """
@@ -350,19 +358,46 @@ function estimate(model::MixedLogitModel, choicevar; verbose = true)
 
     mutable_struct = deepcopy(model)
 
-    function objective(θ)
+    # Precompute derivatives
+    dU_tmp = [[derivative(u, pname) for pname in free_names] for u in model.utilities]
+
+    # Force type
+    dU = [convert(Vector{DCMExpression}, dj) for dj in dU_tmp]
+
+    function f_obj(θ)
         for (i, name) in enumerate(free_names)
             mutable_struct.parameters[name] = θ[i]
         end
+
         for name in fixed_names
             mutable_struct.parameters[name] = init_values[name]
         end
-        return -loglikelihood(mutable_struct, choices)
+
+        loglik = loglikelihood(mutable_struct,choices)
+        return -loglik
+    end
+
+    function g_obj(θ)
+        for (i, name) in enumerate(free_names)
+            mutable_struct.parameters[name] = θ[i]
+        end
+
+        for name in fixed_names
+            mutable_struct.parameters[name] = init_values[name]
+        end
+
+        grad = gradient(mutable_struct,choices,dU)
+        return -grad
     end
 
     # function objective(θ)
-    #     updated = update_model(model, θ, free_names, fixed_names, init_values)
-    #     return -loglikelihood(updated, choices)
+    #     for (i, name) in enumerate(free_names)
+    #         mutable_struct.parameters[name] = θ[i]
+    #     end
+    #     for name in fixed_names
+    #         mutable_struct.parameters[name] = init_values[name]
+    #     end
+    #     return -loglikelihood(mutable_struct, choices)
     # end
 
     if verbose
@@ -371,15 +406,16 @@ function estimate(model::MixedLogitModel, choicevar; verbose = true)
     
     t_start = time()
     result = Optim.optimize(
-        objective,
+        f_obj,
+        g_obj,
         θ0,
         Optim.BFGS(linesearch=LineSearches.HagerZhang()),
         Optim.Options(
             show_trace = verbose,
             iterations = 1000,
             f_abstol=1e-6,
-            g_abstol=1e-8);
-        autodiff = :forward
+            g_abstol=1e-8),
+        inplace=false
     )
 
     if verbose && Optim.converged(result)
@@ -401,7 +437,7 @@ function estimate(model::MixedLogitModel, choicevar; verbose = true)
     end
 
     # H = ForwardDiff.hessian(objective, θ̂)
-    H = FiniteDiff.finite_difference_hessian(objective, θ̂)
+    H = FiniteDiff.finite_difference_hessian(f_obj, θ̂)
     # vcov = LinearAlgebra.cholesky(H) \ I
     vcov = inv(H)
     # vcov = pinv(H)

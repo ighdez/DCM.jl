@@ -169,7 +169,7 @@ Computes the log-likelihood value of the model given observed choices.
 
 Total log-likelihood value
 """
-function loglikelihood(model::LogitModel, choices::Vector{Int},dU::Vector{Vector{DCMExpression}};gradients=true)
+function loglikelihood(model::LogitModel, choices::Vector{Int})
     probs = logit_prob(
         model.utilities,
         model.data,
@@ -177,53 +177,62 @@ function loglikelihood(model::LogitModel, choices::Vector{Int},dU::Vector{Vector
         model.parameters,
     )
 
-    N, J = size(probs)
+    N, _ = size(probs)
+
     T = eltype(first(probs))
     loglik = zeros(T, N)
-
-    if gradients
-        K = length(dU[1])
-        grad = zeros(T,K)
-        dU_vals = [Vector{Vector{T}}(undef, J) for _ in 1:K]
-
-        # Evaluate derivatives once
-        Threads.@threads for k in 1:K
-            for j in 1:J
-                dU_vals[k][j] = evaluate(dU[j][k], model.data, model.parameters)
-            end
-        end
-        grad_vecs = [zeros(T, N) for _ in 1:K]
-    end
 
     # Loop over observations
     Threads.@threads for n in 1:N
         chosen = choices[n]
         p = probs[n, chosen]
         loglik[n] = log(p)
-        if gradients
-            for k in 1:K
-                ∂U_ch = dU_vals[k][chosen][n]
-                s = zero(eltype(model.data[!,1]))
-                for j in 1:J
-                    s += probs[n,j] * dU_vals[k][j][n]
-                end
-                grad_vecs[k][n] = ∂U_ch - s
-            end
+    end
+
+    return sum(loglik)
+end
+
+function gradient(model::LogitModel, choices::Vector{Int}, dU::Vector{Vector{DCMExpression}})
+    probs = logit_prob(
+        model.utilities,
+        model.data,
+        model.availability,
+        model.parameters,
+    )
+    
+    N, J = size(probs)
+    K = length(dU[1])
+
+    T = eltype(first(probs))
+    grad = zeros(T,K)
+    dU_vals = [Vector{Vector{T}}(undef, J) for _ in 1:K]
+
+    # Evaluate derivatives once
+    Threads.@threads for k in 1:K
+        for j in 1:J
+            dU_vals[k][j] = evaluate(dU[j][k], model.data, model.parameters)
         end
     end
 
-    if gradients
-        Threads.@threads for k in 1:K
-            grad[k] = sum(grad_vecs[k])
+    # Loop over obs
+    grad_vecs = [zeros(T, N) for _ in 1:K]
+    Threads.@threads for n in 1:N
+        chosen = choices[n]
+        for k in 1:K
+            ∂U_ch = dU_vals[k][chosen][n]
+            s = zero(eltype(model.data[!,1]))
+            for j in 1:J
+                s += probs[n,j] * dU_vals[k][j][n]
+            end
+            grad_vecs[k][n] = ∂U_ch - s
         end
     end
-    
-    # Return only loglik if gradients = false
-    if gradients
-        return sum(loglik), grad
-    else
-        return sum(loglik), []
+
+    for k in 1:K
+        grad[k] = sum(grad_vecs[k])
     end
+
+    return grad
 end
 
 """
@@ -282,7 +291,7 @@ function estimate(
     # Force type
     dU = [convert(Vector{DCMExpression}, dj) for dj in dU_tmp]
 
-    function f_obj(θ;gradients=true)
+    function f_obj(θ)
         for (i, name) in enumerate(free_names)
             mutable_struct.parameters[name] = θ[i]
         end
@@ -291,11 +300,11 @@ function estimate(
             mutable_struct.parameters[name] = init_values[name]
         end
 
-        loglik, grad = loglikelihood(mutable_struct,choices,dU;gradients=gradients)
-        return -loglik, -grad
+        loglik = loglikelihood(mutable_struct,choices)
+        return -loglik
     end
 
-    function f_obj_loglik_only(θ)
+    function g_obj(θ)
         for (i, name) in enumerate(free_names)
             mutable_struct.parameters[name] = θ[i]
         end
@@ -304,8 +313,8 @@ function estimate(
             mutable_struct.parameters[name] = init_values[name]
         end
 
-        loglik,_ = loglikelihood(mutable_struct,choices,dU;gradients=false)
-        return -loglik
+        grad = gradient(mutable_struct,choices,dU)
+        return -grad
     end
 
     if verbose
@@ -313,10 +322,14 @@ function estimate(
     end
 
     t_start = time()
-    result = bfgsmin(
+    result = Optim.optimize(
             f_obj,
-            θ0;
-            verbose=true)
+            g_obj,
+            θ0,
+            Optim.BFGS(),
+            Optim.Options(
+                show_trace = verbose,
+                iterations = 1000),inplace=false)
 
     θ̂ = result.solution
     estimated_params = Dict{Symbol, Real}()
@@ -334,7 +347,7 @@ function estimate(
         println("Computing Standard Errors")
     end
 
-    H = FiniteDiff.finite_difference_hessian(f_obj_loglik_only, θ̂)
+    H = FiniteDiff.finite_difference_hessian(f_obj, θ̂)
     
     vcov = try
         inv(H)
