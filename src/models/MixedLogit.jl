@@ -369,15 +369,14 @@ function estimate(model::MixedLogitModel, choicevar; verbose = true)
 
     H = FiniteDiff.finite_difference_hessian(f_obj, θ̂)
     
-    try
-        vcov = inv(H)
-        std_errors = sqrt.(diag(vcov))
-    catch
-        vcov = pinv(H)
-        std_errors = sqrt.(diag(vcov))
+    
+    vcov = try 
+            inv(H)
+        catch
+            pinv(H)
     end
     
-    # std_errors = sqrt.(diag(vcov))
+    std_errors = sqrt.(diag(vcov))
     t_end = time()
 
     se = Dict{Symbol, Real}()
