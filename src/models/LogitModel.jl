@@ -331,7 +331,7 @@ function estimate(
                 show_trace = verbose,
                 iterations = 1000),inplace=false)
 
-    θ̂ = result.solution
+    θ̂ = Optim.minimizer(result)
     estimated_params = Dict{Symbol, Real}()
 
     for (i, name) in enumerate(free_names)
@@ -365,12 +365,13 @@ function estimate(
     end
 
     return (
+        result = result,
         parameters = estimated_params,
         std_errors = se,
         vcov = vcov,
-        loglikelihood = -result.f_value,
-        iters = result.iterations,
-        converged = result.convergence,
+        loglikelihood = -Optim.minimum(result),
+        iters = Optim.iterations(result),
+        converged = Optim.converged(result),
         estimation_time = t_end - t_start
     )
 end
