@@ -223,7 +223,7 @@ end
     # Returns
     - Total log-likelihood value (Float64)
 """
-function loglikelihood(model::MixedLogitModel, choices::Vector{Int})
+function llgrad(model::MixedLogitModel, choices::Vector{Int}; dU::Union{Nothing,Vector{Vector{DCMExpression}}}=nothing)
     probs = logit_prob(
         model.utilities,
         model.data,
@@ -234,14 +234,34 @@ function loglikelihood(model::MixedLogitModel, choices::Vector{Int})
         model.R
     )
 
-    N, R, _ = size(probs)
+    N, R, J = size(probs)
+    T = eltype(first(probs))
 
     # Unique individuals and ID map
     id_map = model.id_dict
     I = length(id_map)
     
+    if !isnothing(dU)
+        K = length(dU[1])
+        grad_accum = [zeros(T, I) for _ in 1:K]
+        grad = zeros(T, K)
+
+        # Evaluate derivatives once
+        dU_vals = [Array{T}(undef, N, R, J) for _ in 1:K]
+        Threads.@threads for k in 1:K
+            for j in 1:J
+                tmp = evaluate(dU[j][k], model.data, model.parameters, model.draws, model.expanded_vars)
+                for n in 1:N
+                    for r in 1:R
+                        dU_vals[k][n, r, j] = tmp[n, r]
+                    end
+                end
+            end
+        end
+    end
+
+
     # Initialize simulated probability matrix: R x I
-    T = eltype(probs)
     log_indiv_prob = zeros(T, R, I)
     indiv_prob = zeros(T, I)
     loglik = zeros(T, I)
@@ -265,55 +285,33 @@ function loglikelihood(model::MixedLogitModel, choices::Vector{Int})
         indiv_prob[i] = indiv_prob[i] / R
         loglik[i] = log(max(indiv_prob[i],T(1e-12)))
     end
-    return sum(loglik)
-end
 
-function gradient(model::MixedLogitModel, choices::Vector{Int}, dU::Vector{Vector{DCMExpression}})
-    probs = logit_prob(
-        model.utilities,
-        model.data,
-        model.availability,
-        model.parameters,
-        model.draws,
-        model.expanded_vars,
-        model.R
-    )
-
-    N, R, J = size(probs)
-    K = length(dU[1])
-
-    T = eltype(first(probs))
-    grad = zeros(T,K)
-    dU_vals = [Vector{Matrix{T}}(undef, J) for _ in 1:K]
-
-    # Evaluate derivatives once
-    Threads.@threads for k in 1:K
-        for j in 1:J
-            dU_vals[k][j] = evaluate(dU[j][k], model.data, model.parameters,model.draws,model.expanded_vars)
-        end
-    end
-
-    # Loop over obs
-    grad_vecs = [zeros(T, N, R) for _ in 1:K]
-    Threads.@threads for n in 1:N
-        chosen = choices[n]
-        for r in 1:R
-            for k in 1:K
-                ∂U_ch = dU_vals[k][chosen][n,r]
-                s = 0.0
-                for j in 1:J
-                    s += probs[n,r,j] * dU_vals[k][j][n,r]
+    # Accumulate gradients safely (1 buffer per K x I)
+    if !isnothing(dU)
+        Threads.@threads for n in 1:N
+            chosen = choices[n]
+            i = id_map[model.id[n]]
+            for r in 1:R
+                for k in 1:K
+                    ∂U_ch = dU_vals[k][n, r, chosen]
+                    s = zero(T)
+                    for j in 1:J
+                        s += probs[n, r, j] * dU_vals[k][n, r, j]
+                    end
+                    grad_accum[k][i] += (∂U_ch - s) * exp(log_indiv_prob[r, i]) / max(indiv_prob[i], T(1e-12))
                 end
-                grad_vecs[k][n,r] = ∂U_ch - s
             end
         end
+        # Sum over individuals
+        for k in 1:K
+            grad[k] = sum(grad_accum[k])
+        end
+        # Return gradient
+        return grad
     end
 
-    Threads.@threads for k in 1:K
-        grad[k] = sum(grad_vecs[k]) / model.R
-    end
-
-    return grad
+    # Return sum of loglik
+    return sum(loglik)
 end
 
 """
@@ -373,7 +371,7 @@ function estimate(model::MixedLogitModel, choicevar; verbose = true)
             mutable_struct.parameters[name] = init_values[name]
         end
 
-        loglik = loglikelihood(mutable_struct,choices)
+        loglik = llgrad(mutable_struct,choices)
         return -loglik
     end
 
@@ -386,19 +384,9 @@ function estimate(model::MixedLogitModel, choicevar; verbose = true)
             mutable_struct.parameters[name] = init_values[name]
         end
 
-        grad = gradient(mutable_struct,choices,dU)
+        grad = llgrad(mutable_struct,choices;dU)
         return -grad
     end
-
-    # function objective(θ)
-    #     for (i, name) in enumerate(free_names)
-    #         mutable_struct.parameters[name] = θ[i]
-    #     end
-    #     for name in fixed_names
-    #         mutable_struct.parameters[name] = init_values[name]
-    #     end
-    #     return -loglikelihood(mutable_struct, choices)
-    # end
 
     if verbose
         println("Starting optimization routine...")
@@ -436,11 +424,14 @@ function estimate(model::MixedLogitModel, choicevar; verbose = true)
         println("Computing Standard Errors")
     end
 
-    # H = ForwardDiff.hessian(objective, θ̂)
     H = FiniteDiff.finite_difference_hessian(f_obj, θ̂)
-    # vcov = LinearAlgebra.cholesky(H) \ I
-    vcov = inv(H)
-    # vcov = pinv(H)
+
+    vcov = try
+        inv(H)
+    catch
+        pinv(H)
+    end
+
     std_errors = sqrt.(diag(vcov))
     t_end = time()
 

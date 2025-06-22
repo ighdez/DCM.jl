@@ -321,6 +321,10 @@ function estimate(
                 show_trace = verbose,
                 iterations = 1000),inplace=false)
 
+    if verbose && Optim.converged(result)
+        println("Converged")
+    end
+    
     θ̂ = Optim.minimizer(result)
     estimated_params = Dict{Symbol, Real}()
 
