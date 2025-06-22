@@ -52,6 +52,7 @@ using Optim, LineSearches, DataFrames, ForwardDiff, FiniteDiff, LinearAlgebra, D
 include("Expressions.jl")
 include("Utils.jl")
 include("Draws.jl")
+include("Minimizers.jl")
 include("Models.jl")
 
 end

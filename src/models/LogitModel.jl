@@ -322,20 +322,13 @@ function estimate(
     end
 
     t_start = time()
-    result = Optim.optimize(
+    result = bfgsmin(
             f_obj,
             g_obj,
-            θ0,
-            Optim.BFGS(),
-            Optim.Options(
-                show_trace = verbose,
-                iterations = 1000),inplace=false)
+            θ0;
+            verbose=true)
 
-    if verbose & Optim.converged(result)
-        println("Converged")
-    end
-
-    θ̂ = Optim.minimizer(result)
+    θ̂ = result.solution
     estimated_params = Dict{Symbol, Real}()
 
     for (i, name) in enumerate(free_names)
@@ -369,13 +362,12 @@ function estimate(
     end
 
     return (
-        result = result,
         parameters = estimated_params,
         std_errors = se,
         vcov = vcov,
-        loglikelihood = -Optim.minimum(result),
-        iters = Optim.iterations(result),
-        converged = Optim.converged(result),
+        loglikelihood = -result.f_value,
+        iters = result.iterations,
+        converged = result.convergence,
         estimation_time = t_end - t_start
     )
 end
