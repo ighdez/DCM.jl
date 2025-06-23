@@ -234,37 +234,38 @@ function loglikelihood(model::MixedLogitModel, choices::Vector{Int})
         model.R
     )
 
-    N, R, _ = size(probs)
+    N, R, J = size(probs)
 
     # Unique individuals and ID map
     id_map = model.id_dict
     I = length(id_map)
     
     # Initialize simulated probability matrix: R x I
-    T = eltype(probs)
+    T = eltype(first(probs))
     log_indiv_prob = zeros(T, R, I)
-    indiv_prob = zeros(T, I)
-    loglik = zeros(T, I)
-
 
     # Multiply probabilities of chosen alternatives across observations for each individual and draw
     Threads.@threads for n in 1:N
         chosen = choices[n]
         i = id_map[model.id[n]]
-        for r in 1:R
-            p = probs[n, r, chosen]
-            log_indiv_prob[r, i] += log(max(p,T(1e-12)))
+        @inbounds for r in 1:R
+            log_indiv_prob[r, i] += log(max(probs[n, r, chosen],T(1e-12)))
         end
     end
 
     # Average over draws and compute log-likelihood
+    loglik = zeros(T,I)
     Threads.@threads for i in 1:I
-        for r in 1:R
-            indiv_prob[i] += max(exp(log_indiv_prob[r,i]),T(1e-12))
+        acc = zero(T)
+
+        @inbounds for r in 1:R
+            acc += exp(log_indiv_prob[r, i])
         end
-        @inbounds indiv_prob[i] = indiv_prob[i] / R
-        @inbounds loglik[i] = log(max(indiv_prob[i],T(1e-12)))
+
+        avg_prob = acc / R
+        loglik[i] = log(max(avg_prob, T(1e-12)))
     end
+
     return sum(loglik)
 end
 
