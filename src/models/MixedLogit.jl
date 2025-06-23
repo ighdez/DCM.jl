@@ -137,7 +137,7 @@ function logit_prob(
     N = nrow(data)
     J = length(utilities)
 
-    # Evaluate utility for each alternative -> utils[j] is N x R
+    # Evaluated utilities: utils[j] is N × R
     utils = Vector{Matrix}(undef, J)
     Threads.@threads for j in 1:J
         utils[j] = evaluate(utilities[j], data, parameters, draws, expanded_vars)
@@ -145,26 +145,30 @@ function logit_prob(
 
     # Initialize 3D tensor: (N, R, J)
     T = eltype(first(utils))
-    expU = Array{T, 3}(undef, N, R, J)
-    s_expU = zeros(T,N,R)
-    probs = zeros(T,N,R,J)
 
-    # Loop over rows
-    Threads.@threads for n in 1:N
-        for r in 1:R
-            for j in 1:J
-                U_nrj = utils[j][n,r]
-                av_nj = availability[j][n]
-                expU[n,r,j] = av_nj ? exp(clamp(U_nrj,T(-200.0),T(200.0))) : T(0)
-                s_expU[n,r] += expU[n,r,j]
-            end
-            s_expU[n,r] = max(s_expU[n,r],T(1e-300)) # Failsafe to avoid divide by zero
-            for j in 1:J
-                probs[n,r,j] = expU[n,r,j] / s_expU[n,r]
-            end
-        end
+    # Stack utils into a single tensor U of size (N, R, J)
+    U = Array{T}(undef, N, R, J)
+    Threads.@threads for j in 1:J
+        @views U[:, :, j] .= utils[j]
     end
-return probs
+
+    # Apply availability → mask entries as -Inf where unavailable
+    Threads.@threads for j in 1:J
+        av_col = reshape(availability[j], N, 1)  # expand for broadcasting
+        @views U[:, :, j] .= ifelse.(av_col, U[:, :, j], -Inf)
+    end
+
+    # Compute probabilities
+    expU = exp.(clamp.(U, T(-200), T(200)))              # stabilize
+    s_expU = sum(expU, dims=3)                           # sum across alternatives
+
+    probs = similar(expU)
+
+    Threads.@threads for j in 1:J
+        @views probs[:, :, j] .= expU[:, :, j] ./ s_expU
+    end
+
+    return probs
 end
 
 """
@@ -234,7 +238,7 @@ function loglikelihood(model::MixedLogitModel, choices::Vector{Int})
         model.R
     )
 
-    N, R, J = size(probs)
+    N, R, _ = size(probs)
 
     # Unique individuals and ID map
     id_map = model.id_dict
@@ -242,19 +246,27 @@ function loglikelihood(model::MixedLogitModel, choices::Vector{Int})
     
     # Initialize simulated probability matrix: R x I
     T = eltype(first(probs))
-    log_indiv_prob = zeros(T, R, I)
 
-    # Multiply probabilities of chosen alternatives across observations for each individual and draw
+    # Precompute probs[n, r, chosen[n]] as matrix N × R
+    probs_chosen = Array{T}(undef, N, R)
     Threads.@threads for n in 1:N
         chosen = choices[n]
-        i = id_map[model.id[n]]
         @inbounds for r in 1:R
-            log_indiv_prob[r, i] += log(max(probs[n, r, chosen],T(1e-12)))
+            probs_chosen[n, r] = max(probs[n, r, chosen], T(1e-12))
         end
     end
 
-    # Average over draws and compute log-likelihood
-    loglik = zeros(T,I)
+    # Compute log_indiv_prob[r, i] by summing over observations
+    log_indiv_prob = zeros(T, R, I)
+    Threads.@threads for n in 1:N
+        i = id_map[model.id[n]]
+        @inbounds for r in 1:R
+            log_indiv_prob[r, i] += log(probs_chosen[n, r])
+        end
+    end
+    
+    # Aggregate over draws and compute final log-likelihood per individual
+    loglik = Vector{T}(undef, I)
     Threads.@threads for i in 1:I
         acc = zero(T)
 
@@ -332,15 +344,15 @@ function estimate(model::MixedLogitModel, choicevar; verbose = true)
     result = Optim.optimize(
         f_obj,
         θ0,
-        Optim.BFGS(),#linesearch = LineSearches.HagerZhang(
-            # delta = 0.2,           # más conservador que 0.1
-            # sigma = 0.8,           # curvatura fuerte (evita pasos grandes)
-            # alphamax = 2.0,        # permite explorar pasos amplios (útil si gradientes son suaves)
-            # rho = 1e-10,           # mínima diferencia relativa entre pasos
-            # epsilon = 1e-6,        # precisión media (puede subir si el gradiente es ruidoso)
-            # gamma = 1e-4,          # estabilidad numérica
-            # linesearchmax = 30,    # permitir más pasos si gradiente es irregular
-            # )),
+        Optim.BFGS(linesearch = LineSearches.HagerZhang(
+            delta = 0.2,           # más conservador que 0.1
+            sigma = 0.5,           # curvatura fuerte (evita pasos grandes)
+            alphamax = 1.0,        # permite explorar pasos amplios (útil si gradientes son suaves)
+            rho = 1e-6,            # mínima diferencia relativa entre pasos
+            epsilon = 1e-4,        # precisión media (puede subir si el gradiente es ruidoso)
+            gamma = 1e-4,          # estabilidad numérica
+            linesearchmax = 30,    # permitir más pasos si gradiente es irregular
+            )),
             Optim.Options(
             show_trace = verbose,
             iterations = 1000,
@@ -368,8 +380,8 @@ function estimate(model::MixedLogitModel, choicevar; verbose = true)
         println("Computing Standard Errors")
     end
 
-    H = FiniteDiff.finite_difference_hessian(f_obj, θ̂)
-    
+    # H = FiniteDiff.finite_difference_hessian(f_obj, θ̂)
+    H = ForwardDiff.hessian(f_obj, θ̂)
     
     vcov = try 
             inv(H)
