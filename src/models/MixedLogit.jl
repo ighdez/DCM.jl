@@ -200,7 +200,7 @@ function logit_prob(
 
     # Compute probabilities
     expU = exp.(clamp.(U, T(-200), T(200)))              # stabilize
-    s_expU = sum(expU, dims=4)                           # sum across alternatives
+    s_expU = max.(sum(expU, dims=4), T(1e-300))                           # sum across alternatives
 
     probs = expU ./ max.(s_expU, T(1e-12))
 
@@ -379,9 +379,9 @@ function estimate(model::MixedLogitModel, choicevar; verbose = true)
         θ0,
         Optim.BFGS(linesearch = LineSearches.HagerZhang(
             delta = 0.2,           # más conservador que 0.1
-            sigma = 0.8,           # curvatura fuerte (evita pasos grandes)
+            sigma = 0.5,           # curvatura fuerte (evita pasos grandes)
             alphamax = 1.0,        # permite explorar pasos amplios (útil si gradientes son suaves)
-            rho = 1e-10,            # mínima diferencia relativa entre pasos
+            rho = 1e-6,            # mínima diferencia relativa entre pasos
             epsilon = 1e-4,        # precisión media (puede subir si el gradiente es ruidoso)
             gamma = 1e-4,          # estabilidad numérica
             linesearchmax = 30,    # permitir más pasos si gradiente es irregular
@@ -413,8 +413,8 @@ function estimate(model::MixedLogitModel, choicevar; verbose = true)
         println("Computing Standard Errors")
     end
 
-    # H = FiniteDiff.finite_difference_hessian(f_obj, θ̂)
-    H = ForwardDiff.hessian(f_obj, θ̂)
+    H = FiniteDiff.finite_difference_hessian(f_obj, θ̂)
+    # H = ForwardDiff.hessian(f_obj, θ̂)
     
     vcov = try 
             inv(H)
