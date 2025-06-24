@@ -26,12 +26,11 @@ using DataFrames, StatsBase
 
 struct MixedLogitModel <: DiscreteChoiceModel
     utilities::Vector{DCMExpression}                # Utility expressions V_j
-    data::DataFrame                                 # Dataset
-    availability::Vector{Vector{Bool}}              # Alternative availability
     parameters::Dict                                # Initial parameter values (mu, sigma, etc.)
+    cs_availability::Array                          # Choice set availability
+    availability::Array                             # Alternative availability
     expanded_vars::Dict                             # Expanded variables
-    draws::Dict                                     # Draws: N x R
-    draw_scheme::Symbol                             # :normal, :uniform, :mlhs, etc.
+    expanded_draws::Dict                            # Draws: N x R
     R::Int                                          # Number of simulations (draws)
 end
 
@@ -105,12 +104,12 @@ function MixedLogitModel(
     for var in variable_symbols
         col = data[:, var]
         var_tensor = zeros(I, max_C, R)
-        row_idx = 1  # índice actual en `data`, recorre fila a fila
+        row_idx = 1
 
         for (i, pid) in enumerate(individuals)
             C_i = count_per_id[pid]
             for c in 1:C_i
-                var_tensor[i, c, :] .= col[row_idx]  # replicamos el valor para los R draws
+                var_tensor[i, c, :] .= col[row_idx]
                 row_idx += 1
             end
         end
@@ -118,15 +117,42 @@ function MixedLogitModel(
         expanded_vars[var] = var_tensor
     end
 
-    # 5. Build and return the model
+    # Expand availability conditions (I x max_C x R x J)
+    J = length(availability)
+    expanded_avail = falses(I, max_C, R, J)
+
+    row_idx = 1
+    for i in 1:I
+        pid = individuals[i]
+        C_i = count_per_id[pid]
+        for c in 1:C_i
+            for j in 1:J
+                a = availability[j][row_idx] ? true : false
+                expanded_avail[i, c, :, j] .= a
+            end
+            row_idx += 1
+        end
+    end
+
+    # Generate CS availability conditions
+    cs_avail = falses(I, max_C, R, J)
+
+    for i in 1:I
+        pid = individuals[i]
+        C_i = count_per_id[pid]
+        for c in 1:C_i
+            cs_avail[i, c, :, :] .= true
+        end
+    end
+
+    # Build and return the model
     return MixedLogitModel(
         utilities,
-        data,
-        availability,
         parameters,
+        cs_avail,
+        expanded_avail,
         expanded_vars,
         expanded_draws,
-        draw_scheme,
         R
     )
 end
@@ -142,46 +168,41 @@ end
 
 function logit_prob(
     utilities::Vector{<:DCMExpression},
-    data::DataFrame,
-    availability::Vector{<:AbstractVector{Bool}},
     parameters::Dict,
-    draws::Dict,
+    cs_availability::Array,
+    availability::Array,
     expanded_vars::Dict,
-    R::Int,
+    expanded_draws::Dict,
 )
-    N = nrow(data)
     J = length(utilities)
 
     # Evaluated utilities: utils[j] is N × R
-    utils = Vector{Matrix}(undef, J)
+    utils = Vector{Array{<:Real,3}}(undef, J)
+
     Threads.@threads for j in 1:J
-        utils[j] = evaluate(utilities[j], data, parameters, draws, expanded_vars)
+        utils[j] = evaluate(utilities[j], parameters, expanded_draws, expanded_vars)
     end
+
+    I, C, R = size(utils[1])
 
     # Initialize 3D tensor: (N, R, J)
     T = eltype(first(utils))
 
-    # Stack utils into a single tensor U of size (N, R, J)
-    U = Array{T}(undef, N, R, J)
+    # Stack utils into a single tensor U of size (I, C, R, J)
+    U = Array{T}(undef, I, C, R, J)
+
     Threads.@threads for j in 1:J
-        @views U[:, :, j] .= utils[j]
+        @views U[:, :, :, j] .= utils[j]
     end
 
     # Apply availability → mask entries as -Inf where unavailable
-    Threads.@threads for j in 1:J
-        av_col = reshape(availability[j], N, 1)  # expand for broadcasting
-        @views U[:, :, j] .= ifelse.(av_col, U[:, :, j], -Inf)
-    end
+    U .= ifelse.(availability, U, -Inf)
 
     # Compute probabilities
     expU = exp.(clamp.(U, T(-200), T(200)))              # stabilize
-    s_expU = sum(expU, dims=3)                           # sum across alternatives
+    s_expU = sum(expU, dims=4)                           # sum across alternatives
 
-    probs = similar(expU)
-
-    Threads.@threads for j in 1:J
-        @views probs[:, :, j] .= expU[:, :, j] ./ s_expU
-    end
+    probs = expU ./ max.(s_expU, T(1e-12))
 
     return probs
 end
@@ -197,12 +218,11 @@ end
 function predict(model::MixedLogitModel)
     return logit_prob(
         model.utilities,
-        model.data,
-        model.availability,
         model.parameters,
-        model.draws,
+        model.cs_availability,
+        model.availability,
         model.expanded_vars,
-        model.R,
+        model.expanded_draws,
     )
 end
 
@@ -220,14 +240,14 @@ end
 """
 function predict(model::MixedLogitModel, results)
     return logit_prob(
-        model.utilities,
-        model.data,
-        model.availability,
-        results.parameters,
-        model.draws,
-        model.expanded_vars,
-        model.R,
-    )
+    model.utilities,
+    results.parameters,
+    model.cs_availability,
+    model.availability,
+    model.expanded_vars,
+    model.expanded_draws,
+)
+
 end
 
 """
@@ -242,58 +262,40 @@ end
     # Returns
     - Total log-likelihood value (Float64)
 """
-function loglikelihood(model::MixedLogitModel, choices::Vector{Int})
+function loglikelihood(model::MixedLogitModel, choices::Array{Int,3})
     probs = logit_prob(
         model.utilities,
-        model.data,
-        model.availability,
         model.parameters,
-        model.draws,
+        model.cs_availability,
+        model.availability,
         model.expanded_vars,
-        model.R
+        model.expanded_draws,
     )
 
-    N, R, _ = size(probs)
-
-    # Unique individuals and ID map
-    id_map = model.id_dict
-    I = length(id_map)
+    I, C, R, _ = size(probs)
     
     # Initialize simulated probability matrix: R x I
     T = eltype(first(probs))
 
-    # Precompute probs[n, r, chosen[n]] as matrix N × R
-    probs_chosen = Array{T}(undef, N, R)
-    Threads.@threads for n in 1:N
-        chosen = choices[n]
-        @inbounds for r in 1:R
-            probs_chosen[n, r] = max(probs[n, r, chosen], T(1e-12))
+    log_chosen_probs = zeros(T, I, C, R)
+
+    @inbounds Threads.@threads for i in 1:I
+        for c in 1:C
+            for r in 1:R
+                j = choices[i, c, r]
+                if j > 0
+                    log_chosen_probs[i, c, r] = log(max(probs[i, c, r, j],T(1e-12)))
+                end
+            end
         end
     end
 
-    # Compute log_indiv_prob[r, i] by summing over observations
-    log_indiv_prob = zeros(T, R, I)
-    Threads.@threads for n in 1:N
-        i = id_map[model.id[n]]
-        @inbounds for r in 1:R
-            log_indiv_prob[r, i] += log(probs_chosen[n, r])
-        end
-    end
-    
-    # Aggregate over draws and compute final log-likelihood per individual
-    loglik = Vector{T}(undef, I)
-    Threads.@threads for i in 1:I
-        acc = zero(T)
+    log_indiv_prob = sum(log_chosen_probs, dims=2)  # I × 1 × R
+    avg_prob = sum(exp.(log_indiv_prob),dims=3) / model.R
+    loglik_i = log.(max.(avg_prob, T(1e-12)))  # I × 1
 
-        @inbounds for r in 1:R
-            acc += exp(log_indiv_prob[r, i])
-        end
+    return sum(loglik_i)
 
-        avg_prob = acc / R
-        loglik[i] = log(max(avg_prob, T(1e-12)))
-    end
-
-    return sum(loglik)
 end
 
 """
@@ -324,6 +326,22 @@ function estimate(model::MixedLogitModel, choicevar; verbose = true)
 
     choices = Int.(choicevar)
 
+    # Construct Y tensor from cs_availability ∈ Bool[I, C, R, J]
+    I, C, R, J = size(model.cs_availability)
+    N = length(choicevar)
+    Y = zeros(Int, I, C, R)
+    idx = 1
+    @inbounds for i in 1:I
+        for c in 1:C
+            if any(model.cs_availability[i, c, :, :])
+                Y[i, c, :] .= choicevar[idx]
+                idx += 1
+            else
+                Y[i, c, :] .= 0
+            end
+        end
+    end
+    
     params = collect_parameters(model.utilities)
     param_names = [p.name for p in params]
     init_values = Dict(p.name => p.value for p in params)
@@ -347,7 +365,7 @@ function estimate(model::MixedLogitModel, choicevar; verbose = true)
             mutable_struct.parameters[name] = init_values[name]
         end
 
-        loglik = loglikelihood(mutable_struct,choices)
+        loglik = loglikelihood(mutable_struct,Y)
         return -loglik
     end
 
@@ -361,9 +379,9 @@ function estimate(model::MixedLogitModel, choicevar; verbose = true)
         θ0,
         Optim.BFGS(linesearch = LineSearches.HagerZhang(
             delta = 0.2,           # más conservador que 0.1
-            sigma = 0.5,           # curvatura fuerte (evita pasos grandes)
+            sigma = 0.8,           # curvatura fuerte (evita pasos grandes)
             alphamax = 1.0,        # permite explorar pasos amplios (útil si gradientes son suaves)
-            rho = 1e-6,            # mínima diferencia relativa entre pasos
+            rho = 1e-10,            # mínima diferencia relativa entre pasos
             epsilon = 1e-4,        # precisión media (puede subir si el gradiente es ruidoso)
             gamma = 1e-4,          # estabilidad numérica
             linesearchmax = 30,    # permitir más pasos si gradiente es irregular
