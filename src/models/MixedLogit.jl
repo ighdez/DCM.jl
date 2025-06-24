@@ -27,14 +27,12 @@ using DataFrames, StatsBase
 struct MixedLogitModel <: DiscreteChoiceModel
     utilities::Vector{DCMExpression}                # Utility expressions V_j
     data::DataFrame                                 # Dataset
-    id::Vector{Int}                                 # ID
     availability::Vector{Vector{Bool}}              # Alternative availability
     parameters::Dict                                # Initial parameter values (mu, sigma, etc.)
+    expanded_vars::Dict                             # Expanded variables
     draws::Dict                                     # Draws: N x R
     draw_scheme::Symbol                             # :normal, :uniform, :mlhs, etc.
     R::Int                                          # Number of simulations (draws)
-    expanded_vars::Dict                             # Expanded variables
-    id_dict::Dict                                   # Unique ID dict
 end
 
 """
@@ -60,59 +58,76 @@ end
 function MixedLogitModel(
     utilities::Vector{<:DCMExpression};
     data::DataFrame,
-    id::Vector{Int},
+    idvar::Symbol,
     availability::Vector{<:AbstractVector{Bool}} = [],
     parameters::Dict = Dict(),
     draw_scheme::Symbol = :normal,
     R::Int = 100
 )
 
-    # 0. Ensure IDs are sorted
+    # Identify unique individuals
+    id = data[:,idvar]
+
+    # Ensure IDs are sorted
     @assert issorted(id) "The vector `id` must be sorted to ensure consistent draw assignment."
 
-    # 1. Collect all Draw objects in the utility expressions
+    individuals = unique(id)
+    count_per_id = countmap(id)
+
+    I = length(individuals)
+
+    # Get máximum CS on the data
+    max_C = maximum(values(count_per_id))
+
+    # Collect all Draw and Variable objects in the utility expressions
     draw_symbols = collect_draws(utilities)
     variable_symbols = collect_variables(utilities)
-
-    # 2. : Identify unique individuals
-    individuals = unique(id)
-    N_individuals = length(individuals)
     
-    # 3. Generate all draws per individual using external Draws.jl infrastructure
-    draw_struct = generate_draws(draw_symbols, N_individuals, R; scheme=draw_scheme)
+    # Generate all draws per individual using external Draws.jl infrastructure
+    draw_struct = generate_draws(draw_symbols, I, R; scheme=draw_scheme)
     raw_draws = Dict(s => draw_struct.values[s] for s in draw_symbols)
 
-    # 4. Expand draws to observation level
-    id_index_map = Dict(pid => idx for (idx, pid) in enumerate(individuals))
-    N = nrow(data)
-    expanded_draws = Dict{Symbol, Matrix{Float64}}()
+    # Expand draws to observation level
+    expanded_draws = Dict{Symbol, Array{Float64,3}}()
     for (param, matrix) in raw_draws
-        param_draws = zeros(N, R)
-        for (i, pid) in enumerate(id)
-            param_draws[i, :] .= matrix[id_index_map[pid], :]
+        param_draws = zeros(I, max_C, R)
+        for i in 1:I
+            for r in 1:R
+                param_draws[i, :, r] .= matrix[i, r]
+            end
         end
         expanded_draws[param] = param_draws
     end
 
-    # 5. Expand variables
-    expanded_vars = Dict{Symbol, Matrix{Float64}}()
+    # Expand variables
+    expanded_vars = Dict{Symbol, Array{Float64,3}}()
+
     for var in variable_symbols
         col = data[:, var]
-        expanded_vars[var] = repeat(reshape(col, N, 1), 1, R)
+        var_tensor = zeros(I, max_C, R)
+        row_idx = 1  # índice actual en `data`, recorre fila a fila
+
+        for (i, pid) in enumerate(individuals)
+            C_i = count_per_id[pid]
+            for c in 1:C_i
+                var_tensor[i, c, :] .= col[row_idx]  # replicamos el valor para los R draws
+                row_idx += 1
+            end
+        end
+
+        expanded_vars[var] = var_tensor
     end
 
     # 5. Build and return the model
     return MixedLogitModel(
         utilities,
         data,
-        id,
         availability,
         parameters,
+        expanded_vars,
         expanded_draws,
         draw_scheme,
-        R,
-        expanded_vars,
-        id_index_map
+        R
     )
 end
 
