@@ -379,7 +379,7 @@ function estimate(model::MixedLogitModel, choicevar; verbose = true)
         θ0,
         Optim.BFGS(linesearch = LineSearches.HagerZhang(
             delta = 0.2,           # más conservador que 0.1
-            sigma = 0.5,           # curvatura fuerte (evita pasos grandes)
+            sigma = 0.8,           # curvatura fuerte (evita pasos grandes)
             alphamax = 1.0,        # permite explorar pasos amplios (útil si gradientes son suaves)
             rho = 1e-6,            # mínima diferencia relativa entre pasos
             epsilon = 1e-4,        # precisión media (puede subir si el gradiente es ruidoso)
@@ -390,7 +390,7 @@ function estimate(model::MixedLogitModel, choicevar; verbose = true)
             show_trace = verbose,
             iterations = 1000,
             f_abstol=1e-6,
-            g_abstol=1e-8);
+            g_abstol=1e-6);
             autodiff=:forward
     )
 

@@ -1,4 +1,4 @@
-using CSV, DataFrames, Statistics
+using CSV, DataFrames, Statistics, MKL
 using DCM
 
 # Load dataset and filter RP observations only
