@@ -1,5 +1,7 @@
-using CSV, DataFrames, Statistics
+using CSV, DataFrames, Statistics, LinearAlgebra
 using DCM
+
+BLAS.set_num_threads(7)
 
 # Load Swiss route choice dataset
 df = CSV.read("../data/apollo_swissRouteChoiceData.csv", DataFrame)
@@ -51,7 +53,7 @@ availability = [
 ]
 
 # Build and estimate the Mixed Logit model
-model = MixedLogitModel(utilities; data=df, idvar=:ID, availability=availability, R=100, draw_scheme=:halton)
+model = MixedLogitModel(utilities; data=df, idvar=:ID, availability=availability, R=500, draw_scheme=:halton)
 results = estimate(model, df.choice)
 
 # @show results

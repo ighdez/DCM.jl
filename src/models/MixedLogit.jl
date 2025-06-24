@@ -262,7 +262,7 @@ end
     # Returns
     - Total log-likelihood value (Float64)
 """
-function loglikelihood(model::MixedLogitModel, choices::Array{Int,3})
+function loglikelihood(model::MixedLogitModel, Y::Array{Bool,4})
     probs = logit_prob(
         model.utilities,
         model.parameters,
@@ -272,29 +272,28 @@ function loglikelihood(model::MixedLogitModel, choices::Array{Int,3})
         model.expanded_draws,
     )
 
-    I, C, R, _ = size(probs)
+    I, C, R, J = size(probs)
     
     # Initialize simulated probability matrix: R x I
     T = eltype(first(probs))
 
-    log_chosen_probs = zeros(T, I, C, R)
+    # Compute log-probabilities with failsafe
+    log_probs = log.(max.(probs, T(1e-12)))  # I × C × R × J
 
-    @inbounds Threads.@threads for i in 1:I
-        for c in 1:C
-            for r in 1:R
-                j = choices[i, c, r]
-                if j > 0
-                    log_chosen_probs[i, c, r] = log(max(probs[i, c, r, j],T(1e-12)))
-                end
-            end
-        end
-    end
+    # Extract log-probability of chosen alternatives using Y
+    log_chosen = sum(log_probs .* Y, dims=4)   # I × C × R
 
-    log_indiv_prob = sum(log_chosen_probs, dims=2)  # I × 1 × R
-    avg_prob = sum(exp.(log_indiv_prob),dims=3) / model.R
-    loglik_i = log.(max.(avg_prob, T(1e-12)))  # I × 1
+    # Aggregate across choice situations
+    log_indiv = sum(log_chosen, dims=2)        # I × 1 × R
 
-    return sum(loglik_i)
+    # Average across draws
+    indiv_prob = exp.(log_indiv)               # I × 1 × R
+    avg_prob = sum(indiv_prob, dims=3) / model.R
+
+    # Final log-likelihood with failsafe
+    loglik = log.(max.(avg_prob, T(1e-12)))    # I × 1
+
+    return sum(loglik)
 
 end
 
@@ -326,18 +325,20 @@ function estimate(model::MixedLogitModel, choicevar; verbose = true)
 
     choices = Int.(choicevar)
 
-    # Construct Y tensor from cs_availability ∈ Bool[I, C, R, J]
+    # Construct Y tensor (one-hot encoding) from cs_availability
     I, C, R, J = size(model.cs_availability)
     N = length(choicevar)
-    Y = zeros(Int, I, C, R)
+
+    Y = zeros(Bool, I, C, R, J)
     idx = 1
     @inbounds for i in 1:I
         for c in 1:C
             if any(model.cs_availability[i, c, :, :])
-                Y[i, c, :] .= choicevar[idx]
+                j = choicevar[idx]
+                if j > 0
+                    Y[i, c, :, j] .= true  # Marcar como elegido en los R repeats
+                end
                 idx += 1
-            else
-                Y[i, c, :] .= 0
             end
         end
     end
