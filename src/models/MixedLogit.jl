@@ -378,15 +378,15 @@ function estimate(model::MixedLogitModel, choicevar; verbose = true)
     result = Optim.optimize(
         f_obj,
         θ0,
-        Optim.BFGS(linesearch = LineSearches.HagerZhang(
-            delta = 0.2,           # más conservador que 0.1
-            sigma = 0.8,           # curvatura fuerte (evita pasos grandes)
-            alphamax = 1.0,        # permite explorar pasos amplios (útil si gradientes son suaves)
-            rho = 1e-6,            # mínima diferencia relativa entre pasos
-            epsilon = 1e-4,        # precisión media (puede subir si el gradiente es ruidoso)
-            gamma = 1e-4,          # estabilidad numérica
-            linesearchmax = 30,    # permitir más pasos si gradiente es irregular
-            )),
+        Optim.BFGS(),#linesearch = LineSearches.HagerZhang(
+            # delta = 0.2,           # más conservador que 0.1
+            # sigma = 0.8,           # curvatura fuerte (evita pasos grandes)
+            # alphamax = 1.0,        # permite explorar pasos amplios (útil si gradientes son suaves)
+            # rho = 1e-6,            # mínima diferencia relativa entre pasos
+            # epsilon = 1e-4,        # precisión media (puede subir si el gradiente es ruidoso)
+            # gamma = 1e-4,          # estabilidad numérica
+            # linesearchmax = 30,    # permitir más pasos si gradiente es irregular
+            # )),
             Optim.Options(
             show_trace = verbose,
             iterations = 1000,
