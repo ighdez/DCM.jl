@@ -269,7 +269,7 @@ end
     - Total log-likelihood value (Float64)
 """
 function loglikelihood(model::MixedLogitModel, Y::Array{Bool,4})
-    probs_pre = logit_prob(
+    probs = logit_prob(
         model.utilities,
         model.parameters,
         model.cs_availability,
@@ -278,15 +278,13 @@ function loglikelihood(model::MixedLogitModel, Y::Array{Bool,4})
         model.expanded_draws,
     )
     
-    I, C, R, J = size(probs_pre)
-
-    probs = permutedims(probs_pre,(1,3,2,4))
+    I, C, R, J = size(probs)
     
     # Initialize simulated probability matrix
     T = eltype(first(probs))
 
-    log_chosen = zeros(T, I, R, C)
-    log_indiv = zeros(T, I, R)
+    log_chosen = zeros(T, I, C, R)
+    # log_indiv = zeros(T, I, R)
     indiv_prob = zeros(T, I, R)
     avg_prob = zeros(T, I)
     loglik = zeros(T, I)
@@ -294,23 +292,21 @@ function loglikelihood(model::MixedLogitModel, Y::Array{Bool,4})
     Threads.@threads for i in 1:I
         @inbounds begin
             for r in 1:R
+                log_indiv = zero(T)
                 for c in 1:C
                     for j in 1:J
-                        log_prob = log(max(probs[i, r, c, j],T(1e-12)))
-                        if Y[i, r, c, j]
-                            @views log_chosen[i, r, c] += log_prob
+                        if Y[i, c, r, j]
+                            log_indiv += log(max(probs[i, c, r, j], T(1e-12)))
                         end
                     end
-                    @views log_indiv[i, r] += log_chosen[i, r, c]
                 end
-                @views indiv_prob[i, r] = exp(log_indiv[i, r])
-                @views avg_prob[i] += indiv_prob[i, r]
+                indiv_prob[i, r] = exp(log_indiv)
+                avg_prob[i] += indiv_prob[i, r]
             end
-            @views avg_prob[i] /= model.R
-            @views loglik[i] = log(max(avg_prob[i], T(1e-12)))
+            avg_prob[i] /= model.R
+            loglik[i] = log(max(avg_prob[i], T(1e-12)))
         end
     end
-
     return sum(loglik)
 end
 
@@ -359,8 +355,6 @@ function estimate(model::MixedLogitModel, choicevar; verbose = true)
             end
         end
     end
-
-    Y = permutedims(Y,(1,3,2,4))
     
     params = collect_parameters(model.utilities)
     param_names = [p.name for p in params]
@@ -397,15 +391,15 @@ function estimate(model::MixedLogitModel, choicevar; verbose = true)
     result = Optim.optimize(
         f_obj,
         θ0,
-        Optim.BFGS(linesearch = LineSearches.HagerZhang(
-            delta = 0.2,           # más conservador que 0.1
-            sigma = 0.8,           # curvatura fuerte (evita pasos grandes)
-            alphamax = 1.0,        # permite explorar pasos amplios (útil si gradientes son suaves)
-            rho = 1e-6,            # mínima diferencia relativa entre pasos
-            epsilon = 1e-4,        # precisión media (puede subir si el gradiente es ruidoso)
-            gamma = 1e-4,          # estabilidad numérica
-            linesearchmax = 30,    # permitir más pasos si gradiente es irregular
-            )),
+        Optim.BFGS(),#linesearch = LineSearches.HagerZhang(
+            # delta = 0.2,           # más conservador que 0.1
+            # sigma = 0.8,           # curvatura fuerte (evita pasos grandes)
+            # alphamax = 1.0,        # permite explorar pasos amplios (útil si gradientes son suaves)
+            # rho = 1e-6,            # mínima diferencia relativa entre pasos
+            # epsilon = 1e-4,        # precisión media (puede subir si el gradiente es ruidoso)
+            # gamma = 1e-4,          # estabilidad numérica
+            # linesearchmax = 30,    # permitir más pasos si gradiente es irregular
+            # )),
             Optim.Options(
             show_trace = verbose,
             iterations = 1000,
