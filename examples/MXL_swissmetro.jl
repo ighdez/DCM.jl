@@ -1,4 +1,4 @@
-using CSV, DataFrames, Statistics, LinearAlgebra, AppleAccelerate
+using CSV, DataFrames, Statistics, LinearAlgebra
 using DCM
 
 BLAS.set_num_threads(7)
