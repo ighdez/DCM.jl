@@ -427,8 +427,8 @@ function estimate(model::MixedLogitModel, choicevar; verbose = true)
         println("Computing Standard Errors")
     end
 
-    H = FiniteDiff.finite_difference_hessian(f_obj, θ̂)
-    # H = ForwardDiff.hessian(f_obj, θ̂)
+    # H = FiniteDiff.finite_difference_hessian(f_obj, θ̂)
+    H = ForwardDiff.hessian(f_obj, θ̂)
     
     vcov = try 
             inv(H)
