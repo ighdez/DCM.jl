@@ -200,7 +200,7 @@ function logit_prob(
                     for j in 1:J
                         @views expU[i, c, r, j] = availability[i, c, r, j] ? exp(clamp(utils[j][i, c, r], T(-200), T(200))) : T(0.0)
                     end
-                    @views s_expU[i,c,r] = max(sum(expU[i, c, r, :]),T(1e-300))
+                    @views s_expU[i, c, r] = max(sum(expU[i, c, r, :]),T(1e-300))
 
                     for j in 1:J
                         @views probs[i, c, r, j] = expU[i, c, r, j] / s_expU[i, c, r]
@@ -269,7 +269,7 @@ end
     - Total log-likelihood value (Float64)
 """
 function loglikelihood(model::MixedLogitModel, Y::Array{Bool,4})
-    probs = logit_prob(
+    probs_pre = logit_prob(
         model.utilities,
         model.parameters,
         model.cs_availability,
@@ -277,8 +277,10 @@ function loglikelihood(model::MixedLogitModel, Y::Array{Bool,4})
         model.expanded_vars,
         model.expanded_draws,
     )
+    
+    I, C, R, J = size(probs_pre)
 
-    I, C, R, J = size(probs)
+    probs = permutedims(probs_pre,(1,3,2,4))
     
     # Initialize simulated probability matrix
     T = eltype(first(probs))
@@ -294,8 +296,8 @@ function loglikelihood(model::MixedLogitModel, Y::Array{Bool,4})
             for r in 1:R
                 for c in 1:C
                     for j in 1:J
-                        log_prob = log(max(probs[i, c, r, j],T(1e-12)))
-                        if Y[i, c, r, j]
+                        log_prob = log(max(probs[i, r, c, j],T(1e-12)))
+                        if Y[i, r, c, j]
                             @views log_chosen[i, r, c] += log_prob
                         end
                     end
@@ -357,6 +359,8 @@ function estimate(model::MixedLogitModel, choicevar; verbose = true)
             end
         end
     end
+
+    Y = permutedims(Y,(1,3,2,4))
     
     params = collect_parameters(model.utilities)
     param_names = [p.name for p in params]
