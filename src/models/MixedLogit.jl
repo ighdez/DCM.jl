@@ -189,20 +189,26 @@ function logit_prob(
     T = eltype(first(utils))
 
     # Stack utils into a single tensor U of size (I, C, R, J)
-    U = Array{T}(undef, I, C, R, J)
+    expU = Array{T}(undef, I, C, R, J)
+    s_expU = Array{T}(undef, I, C, R)
+    probs = Array{T}(undef, I, C, R, J)
 
-    Threads.@threads for j in 1:J
-        @views U[:, :, :, j] .= utils[j]
+    Threads.@threads for i in 1:I
+        @inbounds begin
+            for c in 1:C
+                for r in 1:R
+                    for j in 1:J
+                        @views expU[i, c, r, j] = availability[i, c, r, j] ? exp(clamp(utils[j][i, c, r], T(-200), T(200))) : T(0.0)
+                    end
+                    @views s_expU[i,c,r] = max(sum(expU[i, c, r, :]),T(1e-300))
+
+                    for j in 1:J
+                        @views probs[i, c, r, j] = expU[i, c, r, j] / s_expU[i, c, r]
+                    end
+                end
+            end
+        end
     end
-
-    # Apply availability → mask entries as -Inf where unavailable
-    U .= ifelse.(availability, U, -Inf)
-
-    # Compute probabilities
-    expU = exp.(clamp.(U, T(-200), T(200)))              # stabilize
-    s_expU = max.(sum(expU, dims=4), T(1e-300))                           # sum across alternatives
-
-    probs = expU ./ max.(s_expU, T(1e-12))
 
     return probs
 end
@@ -274,27 +280,36 @@ function loglikelihood(model::MixedLogitModel, Y::Array{Bool,4})
 
     I, C, R, J = size(probs)
     
-    # Initialize simulated probability matrix: R x I
+    # Initialize simulated probability matrix
     T = eltype(first(probs))
 
-    # Compute log-probabilities with failsafe
-    log_probs = log.(max.(probs, T(1e-12)))  # I × C × R × J
+    log_chosen = zeros(T, I, R, C)
+    log_indiv = zeros(T, I, R)
+    indiv_prob = zeros(T, I, R)
+    avg_prob = zeros(T, I)
+    loglik = zeros(T, I)
 
-    # Extract log-probability of chosen alternatives using Y
-    log_chosen = sum(log_probs .* Y, dims=4)   # I × C × R
-
-    # Aggregate across choice situations
-    log_indiv = sum(log_chosen, dims=2)        # I × 1 × R
-
-    # Average across draws
-    indiv_prob = exp.(log_indiv)               # I × 1 × R
-    avg_prob = sum(indiv_prob, dims=3) / model.R
-
-    # Final log-likelihood with failsafe
-    loglik = log.(max.(avg_prob, T(1e-12)))    # I × 1
+    Threads.@threads for i in 1:I
+        @inbounds begin
+            for r in 1:R
+                for c in 1:C
+                    for j in 1:J
+                        log_prob = log(max(probs[i, c, r, j],T(1e-12)))
+                        if Y[i, c, r, j]
+                            @views log_chosen[i, r, c] += log_prob
+                        end
+                    end
+                    @views log_indiv[i, r] += log_chosen[i, r, c]
+                end
+                @views indiv_prob[i, r] = exp(log_indiv[i, r])
+                @views avg_prob[i] += indiv_prob[i, r]
+            end
+            @views avg_prob[i] /= model.R
+            @views loglik[i] = log(max(avg_prob[i], T(1e-12)))
+        end
+    end
 
     return sum(loglik)
-
 end
 
 """
