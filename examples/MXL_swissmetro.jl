@@ -60,6 +60,8 @@ availability = [
 ]
 
 # Create model and estimate
+using Random
+Random.seed!(12345)
 model = MixedLogitModel(utilities; idvar=:ID, data=df, availability=availability,R = 100, draw_scheme=:normal)
 results = estimate(model, df.CHOICE)
 
