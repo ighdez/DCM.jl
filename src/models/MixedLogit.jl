@@ -277,38 +277,34 @@ function loglikelihood(model::MixedLogitModel, Y::Array{Bool,4})
         model.expanded_vars,
         model.expanded_draws,
     )
-    
-    I, C, R, J = size(probs)
-    
-    # Initialize simulated probability matrix
-    T = eltype(first(probs))
 
-    log_chosen = zeros(T, I, C, R)
-    # log_indiv = zeros(T, I, R)
-    indiv_prob = zeros(T, I, R)
-    avg_prob = zeros(T, I)
+    I, C, R, J = size(probs)
+    T = eltype(probs)
     loglik = zeros(T, I)
 
     Threads.@threads for i in 1:I
         @inbounds begin
+            prob_sum = zero(T)
             for r in 1:R
-                log_indiv = zero(T)
+                log_prob = zero(T)
                 for c in 1:C
                     for j in 1:J
                         if Y[i, c, r, j]
-                            log_indiv += log(max(probs[i, c, r, j], T(1e-12)))
+                            p = probs[i, c, r, j]
+                            log_prob += log(ifelse(p > 1e-12, p, 1e-12))
                         end
                     end
                 end
-                indiv_prob[i, r] = exp(log_indiv)
-                avg_prob[i] += indiv_prob[i, r]
+                prob_sum += exp(log_prob)
             end
-            avg_prob[i] /= model.R
-            loglik[i] = log(max(avg_prob[i], T(1e-12)))
+            avg_prob = prob_sum / R
+            loglik[i] = log(ifelse(avg_prob > 1e-12, avg_prob, 1e-12))
         end
     end
+
     return sum(loglik)
 end
+
 
 """
     estimate(model::MixedLogitModel, choicevar; verbose = true)

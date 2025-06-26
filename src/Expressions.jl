@@ -185,51 +185,64 @@ Extended evaluate function for symbolic expressions using draws.
 Returns a Matrix{Float64} of size NxR
 """
 function evaluate(expr::DCMExpression, params::AbstractDict, expanded_draws::AbstractDict, expanded_vars::AbstractDict)
-    if expr isa DCMParameter
-        I, C, R = size(first(values(expanded_vars)))
-        return fill(params[expr.name], I, C, R)
-    elseif expr isa DCMVariable
-        return expanded_vars[expr.name]
-    elseif expr isa DCMDraw
-        return expanded_draws[expr.name]
-    elseif expr isa DCMSum
-        left = evaluate(expr.left, params, expanded_draws, expanded_vars)
-        right = evaluate(expr.right, params, expanded_draws, expanded_vars)
-        T = promote_type(eltype(left), eltype(right))
-        out = Array{T}(undef, size(left))
-        @. out = left + right
-        return out
-    elseif expr isa DCMMult
-        left = evaluate(expr.left, params, expanded_draws, expanded_vars)
-        right = evaluate(expr.right, params, expanded_draws, expanded_vars)
-        T = promote_type(eltype(left), eltype(right))
-        out = Array{T}(undef, size(left))
-        @. out = left * right
-        return out
-    elseif expr isa DCMExp
-        arg = evaluate(expr.arg, params, expanded_draws, expanded_vars)
-        T = eltype(arg)
-        out = Array{T}(undef, size(arg))
-        @. out = exp(arg)
-        return out
-    elseif expr isa DCMEqual
-        left_val = evaluate(expr.left, params, expanded_draws, expanded_vars)
-        T = eltype(left_val)
-        out = Array{T}(undef, size(left_val))
-        @. out = ifelse(left_val == expr.right, one(T), zero(T))
-        return out
-    elseif expr isa DCMMinus
-        arg = evaluate(expr.arg, params, expanded_draws, expanded_vars)
-        T = eltype(arg)
-        out = Array{T}(undef, size(arg))
-        @. out = -arg
-        return out
-    elseif expr isa DCMLiteral
-        I, C, R = size(first(values(expanded_vars)))
-        return fill(expr.value, I, C, R)
-    else
-        error("Unknown expression type")
+    result = begin
+        if expr isa DCMParameter
+            I, C, R = size(first(values(expanded_vars)))
+            fill(params[expr.name], I, C, R)
+
+        elseif expr isa DCMVariable
+            expanded_vars[expr.name]
+
+        elseif expr isa DCMDraw
+            expanded_draws[expr.name]
+
+        elseif expr isa DCMSum
+            left = evaluate(expr.left, params, expanded_draws, expanded_vars)
+            right = evaluate(expr.right, params, expanded_draws, expanded_vars)
+            T = promote_type(eltype(left), eltype(right))
+            out = Array{T}(undef, size(left))
+            @. out = left + right
+            out
+
+        elseif expr isa DCMMult
+            left = evaluate(expr.left, params, expanded_draws, expanded_vars)
+            right = evaluate(expr.right, params, expanded_draws, expanded_vars)
+            T = promote_type(eltype(left), eltype(right))
+            out = Array{T}(undef, size(left))
+            @. out = left * right
+            out
+
+        elseif expr isa DCMExp
+            arg = evaluate(expr.arg, params, expanded_draws, expanded_vars)
+            T = eltype(arg)
+            out = Array{T}(undef, size(arg))
+            @. out = exp(arg)
+            out
+
+        elseif expr isa DCMEqual
+            left_val = evaluate(expr.left, params, expanded_draws, expanded_vars)
+            T = eltype(left_val)
+            out = Array{T}(undef, size(left_val))
+            @. out = ifelse(left_val == expr.right, one(T), zero(T))
+            out
+
+        elseif expr isa DCMMinus
+            arg = evaluate(expr.arg, params, expanded_draws, expanded_vars)
+            T = eltype(arg)
+            out = Array{T}(undef, size(arg))
+            @. out = -arg
+            out
+
+        elseif expr isa DCMLiteral
+            I, C, R = size(first(values(expanded_vars)))
+            fill(expr.value, I, C, R)
+
+        else
+            error("Unknown expression type")
+        end
     end
+
+    return result
 end
 
 export Parameter, Variable, Draw
