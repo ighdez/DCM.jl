@@ -66,7 +66,7 @@ model = MixedLogitModel(utilities; idvar=:ID, data=df, availability=availability
 @time results = estimate(model, df.CHOICE)
 
 # Output results
-# summarize_results(results)
+summarize_results(results)
 
 # Predict
 # preds = predict(model,results)
