@@ -187,8 +187,7 @@ Returns a Matrix{Float64} of size NxR
 function evaluate(expr::DCMExpression, params::AbstractDict, expanded_draws::AbstractDict, expanded_vars::AbstractDict)
     if expr isa DCMParameter
         I, C, R = size(first(values(expanded_vars)))
-        x = params[expr.name]
-        return fill(x, I, C, R)
+        return fill(params[expr.name], I, C, R)
     elseif expr isa DCMVariable
         return expanded_vars[expr.name]
     elseif expr isa DCMDraw
@@ -227,8 +226,7 @@ function evaluate(expr::DCMExpression, params::AbstractDict, expanded_draws::Abs
         return out
     elseif expr isa DCMLiteral
         I, C, R = size(first(values(expanded_vars)))
-        x = expr.value
-        return fill(x, I, C, R)
+        return fill(expr.value, I, C, R)
     else
         error("Unknown expression type")
     end
