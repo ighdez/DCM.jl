@@ -27,14 +27,11 @@ using DataFrames, StatsBase
 struct MixedLogitModel <: DiscreteChoiceModel
     utilities::Vector{DCMExpression}                # Utility expressions V_j
     data::DataFrame                                 # Dataset
-    id::Vector{Int}                                 # ID
+    id::Tuple{Dict,Vector}                          # ID
     availability::Vector{Vector{Bool}}              # Alternative availability
     parameters::Dict                                # Initial parameter values (mu, sigma, etc.)
     draws::Dict                                     # Draws: N x R
-    draw_scheme::Symbol                             # :normal, :uniform, :mlhs, etc.
     R::Int                                          # Number of simulations (draws)
-    expanded_vars::Dict                             # Expanded variables
-    id_dict::Dict                                   # Unique ID dict
 end
 
 """
@@ -60,19 +57,21 @@ end
 function MixedLogitModel(
     utilities::Vector{<:DCMExpression};
     data::DataFrame,
-    id::Vector{Int},
+    idvar::Symbol,
     availability::Vector{<:AbstractVector{Bool}} = [],
     parameters::Dict = Dict(),
     draw_scheme::Symbol = :normal,
     R::Int = 100
 )
 
+    # Get id variable
+    id = data[:,idvar]
+
     # 0. Ensure IDs are sorted
     @assert issorted(id) "The vector `id` must be sorted to ensure consistent draw assignment."
 
     # 1. Collect all Draw objects in the utility expressions
     draw_symbols = collect_draws(utilities)
-    variable_symbols = collect_variables(utilities)
 
     # 2. : Identify unique individuals
     individuals = unique(id)
@@ -94,25 +93,15 @@ function MixedLogitModel(
         expanded_draws[param] = param_draws
     end
 
-    # 5. Expand variables
-    expanded_vars = Dict{Symbol, Matrix{Float64}}()
-    for var in variable_symbols
-        col = data[:, var]
-        expanded_vars[var] = repeat(reshape(col, N, 1), 1, R)
-    end
-
     # 5. Build and return the model
     return MixedLogitModel(
         utilities,
         data,
-        id,
+        (id_index_map, id),
         availability,
         parameters,
         expanded_draws,
-        draw_scheme,
-        R,
-        expanded_vars,
-        id_index_map
+        R
     )
 end
 
@@ -128,44 +117,42 @@ end
 function logit_prob(
     utilities::Vector{<:DCMExpression},
     data::DataFrame,
-    availability::Vector{<:AbstractVector{Bool}},
     parameters::Dict,
-    draws::Dict,
-    expanded_vars::Dict,
-    R::Int,
+    availability::Vector{<:AbstractVector{Bool}},  # N × J
+    draws::Dict{Symbol, Matrix{Float64}}, # N × R
 )
-    N = nrow(data)
     J = length(utilities)
 
-    # Evaluate utility for each alternative -> utils[j] is N x R
-    utils = Vector{Matrix}(undef, J)
+    # Evaluated utilities: utils[j] is N × R
+    utils = Vector{Matrix{<:Real}}(undef, J)
+
     Threads.@threads for j in 1:J
-        utils[j] = evaluate(utilities[j], data, parameters, draws, expanded_vars)
+        utils[j] = evaluate(utilities[j], data, parameters, draws)
     end
 
-    # Initialize 3D tensor: (N, R, J)
-    T = eltype(first(utils))
-    expU = Array{T, 3}(undef, N, R, J)
-    s_expU = zeros(T,N,R)
-    probs = zeros(T,N,R,J)
+    N, R = size(utils[1])
 
-    # Loop over rows
-    Threads.@threads for n in 1:N
-        for r in 1:R
+    # Initialize 3D tensor: (N, J, R)
+    T = eltype(first(utils))
+
+    # Stack utils into a single tensor U of size (N, J, R)
+    expU = Array{T}(undef, N, J, R)
+    s_expU = Array{T}(undef, N, R)
+
+    Threads.@threads for r in 1:R
+        @inbounds begin
             for j in 1:J
-                U_nrj = utils[j][n,r]
-                av_nj = availability[j][n]
-                expU[n,r,j] = av_nj ? exp(clamp(U_nrj,T(-200.0),T(200.0))) : T(0)
-                s_expU[n,r] += expU[n,r,j]
+                u = clamp.(utils[j][:,r], T(-200), T(200))
+                expU[:, j, r] .= ifelse.(availability[j], exp.(u), 0.0)
             end
-            s_expU[n,r] = max(s_expU[n,r],T(1e-300)) # Failsafe to avoid divide by zero
-            for j in 1:J
-                probs[n,r,j] = expU[n,r,j] / s_expU[n,r]
-            end
+            s_expU[:, r] .= sum(expU[:, :, r]; dims = 2)
         end
     end
-return probs
+    @inbounds probs = expU ./ max.(reshape(s_expU, N, 1, R), T(1e-12))
+
+    return probs
 end
+
 
 """
     predict(model::MixedLogitModel)
@@ -179,11 +166,9 @@ function predict(model::MixedLogitModel)
     return logit_prob(
         model.utilities,
         model.data,
-        model.availability,
         model.parameters,
-        model.draws,
-        model.expanded_vars,
-        model.R,
+        model.availability,
+        model.draws
     )
 end
 
@@ -203,11 +188,9 @@ function predict(model::MixedLogitModel, results)
     return logit_prob(
         model.utilities,
         model.data,
-        model.availability,
         results.parameters,
-        model.draws,
-        model.expanded_vars,
-        model.R,
+        model.availability,
+        model.draws
     )
 end
 
@@ -223,48 +206,46 @@ end
     # Returns
     - Total log-likelihood value (Float64)
 """
-function loglikelihood(model::MixedLogitModel, choices::Vector{Int})
+function loglikelihood(model::MixedLogitModel, Y::Array{Bool,3};parameters::Dict=mutable_parameters)
     probs = logit_prob(
         model.utilities,
         model.data,
+        parameters,
         model.availability,
-        model.parameters,
-        model.draws,
-        model.expanded_vars,
-        model.R
-    )
+        model.draws
+)
 
-    N, R, _ = size(probs)
-
-    # Unique individuals and ID map
-    id_map = model.id_dict
+    N, _, R = size(probs)
+    id_map, id = model.id
     I = length(id_map)
     
     # Initialize simulated probability matrix: R x I
-    T = eltype(probs)
-    log_indiv_prob = zeros(T, R, I)
-    indiv_prob = zeros(T, I)
+    T = eltype(first(probs))
+
+    # Compute log-probabilities with failsafe
+    log_indiv = zeros(T, I, R)
+    indiv_prob = Array{T}(undef, I, R)
     loglik = zeros(T, I)
-
-
-    # Multiply probabilities of chosen alternatives across observations for each individual and draw
-    Threads.@threads for n in 1:N
-        chosen = choices[n]
-        i = id_map[model.id[n]]
-        for r in 1:R
-            p = probs[n, r, chosen]
-            log_indiv_prob[r, i] += log(max(p,T(1e-12)))
+    Threads.@threads for r in 1:R
+        @inbounds begin
+            log_probs = log.(max.(probs[:, :, r], T(1e-12)))      # N × J
+            log_chosen = sum(log_probs .* Y[:, :, r]; dims = 2)  # N × 1
+            for n in 1:N
+                i = id_map[id[n]]
+                log_indiv[i, r] += log_chosen[n, 1]  # extrae escalar
+            end
+            indiv_prob[:, r] .= exp.(log_indiv[:, r])  # ← CORRECTO
         end
     end
 
-    # Average over draws and compute log-likelihood
+    # Final log-likelihood with failsafe
     Threads.@threads for i in 1:I
-        for r in 1:R
-            indiv_prob[i] += max(exp(log_indiv_prob[r,i]),T(1e-12))
+        @inbounds begin
+            avg_prob = sum(indiv_prob[i, :]) / R
+            loglik[i] = log(max(avg_prob, T(1e-12)))
         end
-        @inbounds indiv_prob[i] = indiv_prob[i] / R
-        @inbounds loglik[i] = log(max(indiv_prob[i],T(1e-12)))
     end
+
     return sum(loglik)
 end
 
@@ -288,13 +269,27 @@ end
         - `converged`: convergence status
         - `estimation_time`: total time in seconds
 """
-function estimate(model::MixedLogitModel, choicevar; verbose = true)
+function estimate(model::MixedLogitModel, choicevar::Symbol; verbose::Bool = true)
     
-    if any(ismissing, choicevar)
+    choice_data = model.data[:,choicevar]
+
+    if any(ismissing, choice_data)
         error("Choice vector contains missing values. Please clean your data.")
     end
 
-    choices = Int.(choicevar)
+    choices = Int.(choice_data)
+
+    # Construct Y tensor (one-hot encoding) from cs_availability
+    J = length(model.utilities)
+    N, R = size(first(values(model.draws)))
+
+    Y = zeros(Bool, N, J, R)
+    @inbounds for n in 1:N
+        j = choices[n]
+        if j > 0
+            Y[n, j, :] .= true
+        end
+    end
 
     params = collect_parameters(model.utilities)
     param_names = [p.name for p in params]
@@ -308,20 +303,31 @@ function estimate(model::MixedLogitModel, choicevar; verbose = true)
     # Initial guess only for free params
     θ0 = [init_values[n] for n in free_names]
 
-    mutable_struct = deepcopy(model)
+    # Preallocate mutable parameter set (no deepcopy of full model)
+    mutable_parameters = deepcopy(model.parameters)
 
     function f_obj(θ)
-        @inbounds for (i, name) in enumerate(free_names)
-            mutable_struct.parameters[name] = θ[i]
+        @inbounds begin
+            for (i, name) in enumerate(free_names)
+                mutable_parameters[name] = θ[i]
+            end
+            
+            for name in fixed_names
+                mutable_parameters[name] = init_values[name]
+            end
         end
 
-        @inbounds for name in fixed_names
-            mutable_struct.parameters[name] = init_values[name]
-        end
-
-        loglik = loglikelihood(mutable_struct,choices)
+        loglik = loglikelihood(model, Y; parameters=mutable_parameters)
         return -loglik
     end
+
+    if verbose
+        println("Warming-up hessian...")
+    end
+    # Warm-up hessian
+    H = zeros(length(θ0), length(θ0))
+    cfg = ForwardDiff.HessianConfig(f_obj, θ0)
+    H = ForwardDiff.hessian!(H, f_obj, θ0, cfg)
 
     if verbose
         println("Starting optimization routine...")
@@ -331,12 +337,12 @@ function estimate(model::MixedLogitModel, choicevar; verbose = true)
     result = Optim.optimize(
         f_obj,
         θ0,
-        Optim.BFGS(),#linesearch = LineSearches.HagerZhang(
+        Optim.BFGS(linesearch=LineSearches.BackTracking()),#linesearch = LineSearches.HagerZhang(
             # delta = 0.2,           # más conservador que 0.1
             # sigma = 0.8,           # curvatura fuerte (evita pasos grandes)
-            # alphamax = 2.0,        # permite explorar pasos amplios (útil si gradientes son suaves)
-            # rho = 1e-10,           # mínima diferencia relativa entre pasos
-            # epsilon = 1e-6,        # precisión media (puede subir si el gradiente es ruidoso)
+            # alphamax = 1.0,        # permite explorar pasos amplios (útil si gradientes son suaves)
+            # rho = 1e-6,            # mínima diferencia relativa entre pasos
+            # epsilon = 1e-4,        # precisión media (puede subir si el gradiente es ruidoso)
             # gamma = 1e-4,          # estabilidad numérica
             # linesearchmax = 30,    # permitir más pasos si gradiente es irregular
             # )),
@@ -367,9 +373,8 @@ function estimate(model::MixedLogitModel, choicevar; verbose = true)
         println("Computing Standard Errors")
     end
 
-    H = FiniteDiff.finite_difference_hessian(f_obj, θ̂)
-    
-    
+    ForwardDiff.hessian!(H, f_obj, θ̂, cfg)
+
     vcov = try 
             inv(H)
         catch
