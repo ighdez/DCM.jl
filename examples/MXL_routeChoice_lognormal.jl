@@ -1,7 +1,7 @@
 using CSV, DataFrames, Statistics, LinearAlgebra
 using DCM
 
-BLAS.set_num_threads(7)
+# BLAS.set_num_threads(7)
 
 # Load Swiss route choice dataset
 df = CSV.read("../data/apollo_swissRouteChoiceData.csv", DataFrame)
@@ -15,18 +15,26 @@ df = sort(df, :ID)
 # df.tc1 ./= 10
 # df.tc2 ./= 10
 
+df.tt1 .*= -1
+df.tt2 .*= -1
+df.hw1 .*= -1
+df.hw2 .*= -1
+df.tc1 .*= -1
+df.tc2 .*= -1
+
+
 # Define parameters for lognormal random coefficients
 mu_tt     = Parameter(:mu_tt, value=-3)
-sigma_tt  = Parameter(:sigma_tt, value=0.01,fixed=false)
+sigma_tt  = Parameter(:sigma_tt, value=0.01)
 
 mu_tc     = Parameter(:mu_tc, value=-3)
-sigma_tc  = Parameter(:sigma_tc, value=0.01,fixed=false)
+sigma_tc  = Parameter(:sigma_tc, value=0.01)
 
 mu_hw     = Parameter(:mu_hw, value=-3)
-sigma_hw  = Parameter(:sigma_hw, value=0.01,fixed=false)
+sigma_hw  = Parameter(:sigma_hw, value=0.01)
 
 mu_ch     = Parameter(:mu_ch, value=-3)
-sigma_ch  = Parameter(:sigma_ch, value=0.01,fixed=false)
+sigma_ch  = Parameter(:sigma_ch, value=0.01)
 
 # Define variables
 tt = Draw(:tt)  # draw for travel time
@@ -35,10 +43,10 @@ hw = Draw(:hw)  # draw for travel time
 ch = Draw(:ch)  # draw for travel cost
 
 # Define random parameters
-b_tt = -exp(mu_tt + sigma_tt * tt)
-b_tc = -exp(mu_tc + sigma_tc * tc)
-b_hw = -exp(mu_hw + sigma_hw * hw)
-b_ch = -exp(mu_ch + sigma_ch * ch)
+b_tt = exp(mu_tt + sigma_tt * tt)
+b_tc = exp(mu_tc + sigma_tc * tc)
+b_hw = exp(mu_hw + sigma_hw * hw)
+b_ch = exp(mu_ch + sigma_ch * ch)
 
 # Define utility functions (alternatives 1, 2)
 V1 = b_tt * Variable(:tt1) + b_tc * Variable(:tc1) + b_hw * Variable(:hw1) + b_ch * Variable(:ch1)
@@ -55,8 +63,8 @@ availability = [
 # Build and estimate the Mixed Logit model
 using Random
 Random.seed!(12345)
-model = MixedLogitModel(utilities; data=df, idvar=:ID, availability=availability, R=200, draw_scheme=:mlhs)
-results = estimate(model, df.choice)
+model = MixedLogitModel(utilities; data=df, idvar=:ID, availability=availability, R=500, draw_scheme=:mlhs)
+@time results = estimate(model, df.choice)
 
 # @show results
 

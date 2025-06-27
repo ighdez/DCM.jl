@@ -216,7 +216,7 @@ function evaluate(expr::DCMExpression, params::AbstractDict, expanded_draws::Abs
             arg = evaluate(expr.arg, params, expanded_draws, expanded_vars)
             T = eltype(arg)
             out = Array{T}(undef, size(arg))
-            @. out = exp(clamp(arg,T(-200.0),T(200.0)))
+            @. out = exp(arg)
             out
 
         elseif expr isa DCMEqual

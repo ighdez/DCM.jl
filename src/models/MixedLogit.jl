@@ -190,23 +190,21 @@ function logit_prob(
 
     # Stack utils into a single tensor U of size (I, C, R, J)
     expU = Array{T}(undef, I, C, J, R)
+    s_expU = Array{T}(undef, I, C, R)
 
     Threads.@threads for r in 1:R
         @inbounds begin
             for j in 1:J
-                @views expU[:, :, j, r] .= exp.(clamp.(utils[j][:,:,r], T(-200), T(200)))
+                # Evaluar y aplicar disponibilidad
+                u = clamp.(utils[j][:,:,r], T(-200), T(200))
+                expU[:, :, j, r] .= exp.(u)
+                expU[:, :, j, r] .= ifelse.(availability[:, :, j, r], expU[:, :, j, r], T(0.0))
             end
-            # Apply availability: mask entries as -Inf where unavailable
-            expU[:, :, :, r] .= ifelse.(availability[:, :, :, r], expU[:, :, :, r], T(0.0))
-        end
-    end
 
-    # Compute probabilities
-    s_expU = Array{T}(undef, I, C, R)
-    @inbounds begin
-        for r in 1:R
-            eu = @view expU[:, :, :, r]
-            @views s_expU[:, :, r] .= sum(eu; dims = 3)
+            # Calcular suma por alternativa
+            s = @view s_expU[:, :, r]
+            e = @view expU[:, :, :, r]
+            s .= sum(e; dims = 3)
         end
     end
     @inbounds probs = expU ./ max.(reshape(s_expU, I, C, 1, R), T(1e-12))
