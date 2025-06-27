@@ -119,7 +119,7 @@ function MixedLogitModel(
 
     # Expand availability conditions (I x max_C x R x J)
     J = length(availability)
-    expanded_avail = falses(I, max_C, R, J)
+    expanded_avail = falses(I, max_C, J, R)
 
     row_idx = 1
     for i in 1:I
@@ -128,14 +128,14 @@ function MixedLogitModel(
         for c in 1:C_i
             for j in 1:J
                 a = availability[j][row_idx] ? true : false
-                expanded_avail[i, c, :, j] .= a
+                expanded_avail[i, c, j, :] .= a
             end
             row_idx += 1
         end
     end
 
     # Generate CS availability conditions
-    cs_avail = falses(I, max_C, R, J)
+    cs_avail = falses(I, max_C, J, R)
 
     for i in 1:I
         pid = individuals[i]
@@ -189,20 +189,27 @@ function logit_prob(
     T = eltype(first(utils))
 
     # Stack utils into a single tensor U of size (I, C, R, J)
-    U = Array{T}(undef, I, C, R, J)
+    expU = Array{T}(undef, I, C, J, R)
 
-    Threads.@threads for j in 1:J
-        @views U[:, :, :, j] .= utils[j]
+    Threads.@threads for r in 1:R
+        @inbounds begin
+            for j in 1:J
+                @views expU[:, :, j, r] .= exp.(clamp.(utils[j][:,:,r], T(-200), T(200)))
+            end
+            # Apply availability: mask entries as -Inf where unavailable
+            expU[:, :, :, r] .= ifelse.(availability[:, :, :, r], expU[:, :, :, r], T(0.0))
+        end
     end
 
-    # Apply availability → mask entries as -Inf where unavailable
-    U .= ifelse.(availability, U, -Inf)
-
     # Compute probabilities
-    expU = exp.(clamp.(U, T(-200), T(200)))              # stabilize
-    s_expU = max.(sum(expU, dims=4), T(1e-300))                           # sum across alternatives
-
-    probs = expU ./ max.(s_expU, T(1e-12))
+    s_expU = Array{T}(undef, I, C, R)
+    @inbounds begin
+        for r in 1:R
+            eu = @view expU[:, :, :, r]
+            @views s_expU[:, :, r] .= sum(eu; dims = 3)
+        end
+    end
+    @inbounds probs = expU ./ max.(reshape(s_expU, I, C, 1, R), T(1e-12))
 
     return probs
 end
@@ -272,26 +279,31 @@ function loglikelihood(model::MixedLogitModel, Y::Array{Bool,4}; parameters::Dic
         model.expanded_draws,
     )
 
-    I, C, R, J = size(probs)
+    I, C, J, R = size(probs)
     
     # Initialize simulated probability matrix: R x I
     T = eltype(first(probs))
 
     # Compute log-probabilities with failsafe
-    log_probs = log.(max.(probs, T(1e-12)))  # I × C × R × J
+    indiv_prob = Array{T}(undef,I,R)
+    loglik = zeros(T,I)
 
-    # Extract log-probability of chosen alternatives using Y
-    log_chosen = sum(log_probs .* Y, dims=4)   # I × C × R
-
-    # Aggregate across choice situations
-    log_indiv = sum(log_chosen, dims=2)        # I × 1 × R
-
-    # Average across draws
-    indiv_prob = exp.(log_indiv)               # I × 1 × R
-    avg_prob = sum(indiv_prob, dims=3) / model.R
+    Threads.@threads for r in 1:R
+        @inbounds begin
+            log_probs = log.(max.(probs[:, :, :, r], T(1e-12)))      # I × C × J
+            log_chosen = sum(log_probs .* Y[:, :, :, r]; dims = 3)  # I × C × 1
+            log_indiv = sum(log_chosen; dims = 2)                   # I × 1 × 1
+            indiv_prob[:, r] .= vec(exp.(log_indiv))                # I × 1
+        end
+    end
 
     # Final log-likelihood with failsafe
-    loglik = log.(max.(avg_prob, T(1e-12)))    # I × 1
+    Threads.@threads for i in 1:I
+        @inbounds begin
+            avg_prob = sum(indiv_prob[i, :]) / R
+            loglik[i] = log(max(avg_prob, T(1e-12)))
+        end
+    end
 
     return sum(loglik)
 
@@ -324,17 +336,17 @@ function estimate(model::MixedLogitModel, choicevar::Vector{Int}; verbose::Bool 
     end
 
     # Construct Y tensor (one-hot encoding) from cs_availability
-    I, C, R, J = size(model.cs_availability)
+    I, C, J, R = size(model.cs_availability)
     N = length(choicevar)
 
-    Y = zeros(Bool, I, C, R, J)
+    Y = zeros(Bool, I, C, J, R)
     idx = 1
     @inbounds for i in 1:I
         for c in 1:C
             if any(model.cs_availability[i, c, :, :])
                 j = choicevar[idx]
                 if j > 0
-                    Y[i, c, :, j] .= true  # Marcar como elegido en los R repeats
+                    Y[i, c, j, :] .= true  # Marcar como elegido en los R repeats
                 end
                 idx += 1
             end
@@ -371,10 +383,10 @@ function estimate(model::MixedLogitModel, choicevar::Vector{Int}; verbose::Bool 
         return -loglik
     end
 
-    # Warm-up hessian
-    H = zeros(length(θ0), length(θ0))
-    cfg = ForwardDiff.HessianConfig(f_obj, θ0)
-    H = ForwardDiff.hessian!(H, f_obj, θ0, cfg)
+    # # Warm-up hessian
+    # H = zeros(length(θ0), length(θ0))
+    # cfg = ForwardDiff.HessianConfig(f_obj, θ0)
+    # H = ForwardDiff.hessian!(H, f_obj, θ0, cfg)
 
     if verbose
         println("Starting optimization routine...")

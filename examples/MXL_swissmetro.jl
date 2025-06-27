@@ -1,7 +1,7 @@
 using CSV, DataFrames, Statistics, LinearAlgebra
 using DCM
 
-BLAS.set_num_threads(7)
+# BLAS.set_num_threads(7)
 
 # Load dataset and filter RP observations only
 df = CSV.read("../data/swissmetro.dat", DataFrame; delim='\t')
