@@ -27,10 +27,10 @@ using DataFrames, StatsBase
 struct MixedLogitModel <: DiscreteChoiceModel
     utilities::Vector{DCMExpression}                # Utility expressions V_j
     parameters::Dict                                # Initial parameter values (mu, sigma, etc.)
-    cs_availability::Array                          # Choice set availability
-    availability::Array                             # Alternative availability
-    expanded_vars::Dict                             # Expanded variables
-    expanded_draws::Dict                            # Draws: N x R
+    cs_availability::Array{Bool}                          # Choice set availability
+    availability::Array{Bool}                             # Alternative availability
+    expanded_vars::Dict{Symbol, Array{Float64,3}}                             # Expanded variables
+    expanded_draws::Dict{Symbol, Array{Float64,3}}                            # Draws: N x R
     R::Int                                          # Number of simulations (draws)
 end
 
@@ -169,10 +169,10 @@ end
 function logit_prob(
     utilities::Vector{<:DCMExpression},
     parameters::Dict,
-    cs_availability::Array,
-    availability::Array,
-    expanded_vars::Dict,
-    expanded_draws::Dict,
+    cs_availability::Array{Bool},
+    availability::Array{Bool},
+    expanded_vars::Dict{Symbol, Array{Float64,3}},
+    expanded_draws::Dict{Symbol, Array{Float64,3}},
 )
     J = length(utilities)
 
@@ -262,10 +262,10 @@ end
     # Returns
     - Total log-likelihood value (Float64)
 """
-function loglikelihood(model::MixedLogitModel, Y::Array{Bool,4})
+function loglikelihood(model::MixedLogitModel, Y::Array{Bool,4}; parameters::Dict=mutable_parameters)
     probs = logit_prob(
         model.utilities,
-        model.parameters,
+        parameters,
         model.cs_availability,
         model.availability,
         model.expanded_vars,
@@ -317,13 +317,11 @@ end
         - `converged`: convergence status
         - `estimation_time`: total time in seconds
 """
-function estimate(model::MixedLogitModel, choicevar; verbose = true)
+function estimate(model::MixedLogitModel, choicevar::Vector{Int}; verbose::Bool = true)
     
     if any(ismissing, choicevar)
         error("Choice vector contains missing values. Please clean your data.")
     end
-
-    choices = Int.(choicevar)
 
     # Construct Y tensor (one-hot encoding) from cs_availability
     I, C, R, J = size(model.cs_availability)
@@ -355,20 +353,28 @@ function estimate(model::MixedLogitModel, choicevar; verbose = true)
     # Initial guess only for free params
     θ0 = [init_values[n] for n in free_names]
 
-    mutable_struct = deepcopy(model)
+    # Preallocate mutable parameter set (no deepcopy of full model)
+    mutable_parameters = deepcopy(model.parameters)
 
     function f_obj(θ)
-        @inbounds for (i, name) in enumerate(free_names)
-            mutable_struct.parameters[name] = θ[i]
+        @inbounds begin
+            for (i, name) in enumerate(free_names)
+                mutable_parameters[name] = θ[i]
+            end
+            
+            for name in fixed_names
+                mutable_parameters[name] = init_values[name]
+            end
         end
 
-        @inbounds for name in fixed_names
-            mutable_struct.parameters[name] = init_values[name]
-        end
-
-        loglik = loglikelihood(mutable_struct,Y)
+        loglik = loglikelihood(model, Y; parameters=mutable_parameters)
         return -loglik
     end
+
+    # Warm-up hessian
+    H = zeros(length(θ0), length(θ0))
+    cfg = ForwardDiff.HessianConfig(f_obj, θ0)
+    H = ForwardDiff.hessian!(H, f_obj, θ0, cfg)
 
     if verbose
         println("Starting optimization routine...")
@@ -378,7 +384,7 @@ function estimate(model::MixedLogitModel, choicevar; verbose = true)
     result = Optim.optimize(
         f_obj,
         θ0,
-        Optim.BFGS(),#linesearch = LineSearches.HagerZhang(
+        Optim.BFGS(linesearch=LineSearches.BackTracking()),#linesearch = LineSearches.HagerZhang(
             # delta = 0.2,           # más conservador que 0.1
             # sigma = 0.8,           # curvatura fuerte (evita pasos grandes)
             # alphamax = 1.0,        # permite explorar pasos amplios (útil si gradientes son suaves)
@@ -391,7 +397,7 @@ function estimate(model::MixedLogitModel, choicevar; verbose = true)
             show_trace = verbose,
             iterations = 1000,
             f_abstol=1e-6,
-            g_abstol=1e-6);
+            g_abstol=1e-8);
             autodiff=:forward
     )
 
@@ -414,9 +420,10 @@ function estimate(model::MixedLogitModel, choicevar; verbose = true)
         println("Computing Standard Errors")
     end
 
-    H = FiniteDiff.finite_difference_hessian(f_obj, θ̂)
-    # H = ForwardDiff.hessian(f_obj, θ̂)
-    
+    # H = FiniteDiff.finite_difference_hessian(f_obj, θ̂)
+    # FiniteDiff.finite_difference_hessian!(H, f_obj, θ̂)
+    ForwardDiff.hessian!(H, f_obj, θ̂, cfg)
+
     vcov = try 
             inv(H)
         catch
