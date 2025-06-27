@@ -188,7 +188,7 @@ function evaluate(expr::DCMExpression, data::DataFrame, params::AbstractDict, ex
     result = begin
         if expr isa DCMParameter
             N = nrow(data)
-            R = size(first(values(draws)), 2)
+            R = size(first(values(expanded_draws)), 2)
             fill(params[expr.name], N, R)
 
         elseif expr isa DCMVariable
@@ -236,7 +236,7 @@ function evaluate(expr::DCMExpression, data::DataFrame, params::AbstractDict, ex
 
         elseif expr isa DCMLiteral
             N = nrow(data)
-            R = size(first(values(draws)), 2)
+            R = size(first(values(expanded_draws)), 2)
             fill(expr.value, N, R)
 
         else
