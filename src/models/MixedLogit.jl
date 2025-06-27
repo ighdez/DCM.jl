@@ -30,10 +30,10 @@ struct MixedLogitModel <: DiscreteChoiceModel
     id::Vector{Int}                                 # ID
     availability::Vector{Vector{Bool}}              # Alternative availability
     parameters::Dict                                # Initial parameter values (mu, sigma, etc.)
-    draws::Dict                                     # Draws: N x R
+    draws::Dict{Symbol, Matrix{Float64}}                                     # Draws: N x R
     draw_scheme::Symbol                             # :normal, :uniform, :mlhs, etc.
     R::Int                                          # Number of simulations (draws)
-    expanded_vars::Dict                             # Expanded variables
+    expanded_vars::Dict{Symbol, Matrix{Float64}}                             # Expanded variables
     id_dict::Dict                                   # Unique ID dict
 end
 
