@@ -142,13 +142,14 @@ function logit_prob(
     Threads.@threads for r in 1:R
         @inbounds begin
             for j in 1:J
-                u = clamp.(utils[j][:,r], T(-200), T(200))
+                # u = clamp.(utils[j][:,r], T(-200), T(200))
+                u = utils[j][:,r]
                 expU[:, j, r] .= ifelse.(availability[j], exp.(u), 0.0)
             end
             s_expU[:, r] .= sum(expU[:, :, r]; dims = 2)
         end
     end
-    @inbounds probs = expU ./ max.(reshape(s_expU, N, 1, R), T(1e-12))
+    @inbounds probs = expU ./ max.(reshape(s_expU, N, 1, R), T(1e-30))
 
     return probs
 end
@@ -228,7 +229,7 @@ function loglikelihood(model::MixedLogitModel, Y::Array{Bool,3};parameters::Dict
     loglik = zeros(T, I)
     Threads.@threads for r in 1:R
         @inbounds begin
-            log_probs = log.(max.(probs[:, :, r], T(1e-12)))      # N × J
+            log_probs = log.(max.(probs[:, :, r], T(1e-30)))      # N × J
             log_chosen = sum(log_probs .* Y[:, :, r]; dims = 2)  # N × 1
             for n in 1:N
                 i = id_map[id[n]]
@@ -242,7 +243,7 @@ function loglikelihood(model::MixedLogitModel, Y::Array{Bool,3};parameters::Dict
     Threads.@threads for i in 1:I
         @inbounds begin
             avg_prob = sum(indiv_prob[i, :]) / R
-            loglik[i] = log(max(avg_prob, T(1e-12)))
+            loglik[i] = log(max(avg_prob, T(1e-30)))
         end
     end
 
