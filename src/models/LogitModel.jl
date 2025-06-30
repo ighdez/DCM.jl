@@ -144,7 +144,7 @@ Computes predicted probabilities using estimated parameters.
 
 A matrix of size N x J, where N is number of observations, J number of alternatives
 """
-function predict(model::LogitModel,results)
+function predict(model::LogitModel,results::NamedTuple)
     probs = logit_prob(
         model.utilities,
         model.data,
@@ -318,4 +318,12 @@ function estimate(
         converged = Optim.converged(result),
         estimation_time = t_end - t_start
     )
+end
+
+function evaluate(expr::Union{DCMExpression,Vector{<:DCMExpression}},model::LogitModel,results::NamedTuple)
+    if expr isa DCMExpression
+        return mean(evaluate(expr,model.data,results.parameters))
+    elseif expr isa Vector{<:DCMExpression}
+        return [mean(evaluate(i,model.data,results.parameters)) for i in expr]
+    end
 end

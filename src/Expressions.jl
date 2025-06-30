@@ -31,6 +31,11 @@ struct DCMMult <: DCMBinary
     right::DCMExpression
 end
 
+struct DCMDiv <: DCMBinary
+    left::DCMExpression
+    right::DCMExpression
+end
+
 struct DCMExp <: DCMUnary
     arg::DCMExpression
 end
@@ -39,12 +44,13 @@ struct DCMMinus <: DCMUnary
     arg::DCMExpression
 end
 
-import Base: ==, +, *, exp, -
+import Base: ==, +, *, /, exp, -
 
 
 ==(a::DCMExpression, b::Real) = DCMEqual(a, b)
 +(a::DCMExpression, b::DCMExpression) = DCMSum(a, b)
 *(a::DCMExpression, b::DCMExpression) = DCMMult(a, b)
+/(a::DCMExpression, b::DCMExpression) = DCMDiv(a, b)
 exp(a::DCMExpression) = DCMExp(a)
 -(a::DCMExpression) = DCMMinus(a)
 
@@ -160,6 +166,8 @@ function evaluate(expr::DCMExpression, data::DataFrame, params::AbstractDict)
         return evaluate(expr.left, data, params) .+ evaluate(expr.right, data, params)
     elseif expr isa DCMMult
         return evaluate(expr.left, data, params) .* evaluate(expr.right, data, params)
+    elseif expr isa DCMDiv
+        return evaluate(expr.left, data, params) ./ evaluate(expr.right, data, params)
     elseif expr isa DCMExp
         return exp.(clamp.(evaluate(expr.arg, data, params),-100.0,100.0))
     elseif expr isa DCMEqual
@@ -246,4 +254,4 @@ function evaluate(expr::DCMExpression, data::DataFrame, params::AbstractDict, dr
     return result
 end
 
-export Parameter, Variable, Draw
+export Parameter, Variable, Draw, evaluate
