@@ -1,4 +1,4 @@
-[![Build Status](https://github.com/ighdez/DCM.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/ighdez/DCM.jl/actions/workflows/CI.yml?query=branch%3Amain)
+<!-- [![Build Status](https://github.com/ighdez/DCM.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/ighdez/DCM.jl/actions/workflows/CI.yml?query=branch%3Amain) -->
 
 
 # DCM.jl — A symbolic, extensible package for estimating Discrete Choice Models in Julia
@@ -59,8 +59,8 @@ DCM separates concerns into the following components:
 ### Models
 
 <!-- * Abstract type: `DiscreteChoiceModel` -->
-* Concrete type: `LogitModel`
-* Future extensions: `MixedLogitModel`, `RRMModel`, etc.
+* Concrete types: `LogitModel`, `MixedLogitModel`
+* Future extensions: `RRMModel`, `MDCEVModel`, etc.
 
 ### Estimation
 
@@ -85,7 +85,7 @@ All public methods are documented using Julia's docstring syntax (`""" ... """`)
 DCM.jl is currently in development. To install from source:
 
 ```julia
-] dev https://github.com/yourusername/DCM.jl
+] dev https://github.com/ighdez/DCM.jl
 ```
 
 ---

@@ -40,11 +40,15 @@ struct DCMExp <: DCMUnary
     arg::DCMExpression
 end
 
+struct DCMLog <: DCMUnary
+    arg::DCMExpression
+end
+
 struct DCMMinus <: DCMUnary
     arg::DCMExpression
 end
 
-import Base: ==, +, *, /, exp, -
+import Base: ==, +, *, /, exp, log, -
 
 
 ==(a::DCMExpression, b::Real) = DCMEqual(a, b)
@@ -52,6 +56,7 @@ import Base: ==, +, *, /, exp, -
 *(a::DCMExpression, b::DCMExpression) = DCMMult(a, b)
 /(a::DCMExpression, b::DCMExpression) = DCMDiv(a, b)
 exp(a::DCMExpression) = DCMExp(a)
+log(a::DCMExpression) = DCMLog(a)
 -(a::DCMExpression) = DCMMinus(a)
 
 """
@@ -169,7 +174,9 @@ function evaluate(expr::DCMExpression, data::DataFrame, params::AbstractDict)
     elseif expr isa DCMDiv
         return evaluate(expr.left, data, params) ./ evaluate(expr.right, data, params)
     elseif expr isa DCMExp
-        return exp.(clamp.(evaluate(expr.arg, data, params),-100.0,100.0))
+        return exp.(evaluate(expr.arg, data, params))
+    elseif expr isa DCMLog
+        return log.(evaluate(expr.arg, data, params))
     elseif expr isa DCMEqual
         left_val = evaluate(expr.left, data, params)
         return ifelse.(left_val .== expr.right, one(eltype(left_val)), zero(eltype(left_val)))
@@ -221,11 +228,26 @@ function evaluate(expr::DCMExpression, data::DataFrame, params::AbstractDict, dr
             @. out = left * right
             out
 
+        elseif expr isa DCMDiv
+            left = evaluate(expr.left, data, params, draws)
+            right = evaluate(expr.right, data, params, draws)
+            T = promote_type(eltype(left), eltype(right))
+            out = Array{T}(undef, size(left))
+            @. out = left / right
+            out
+
         elseif expr isa DCMExp
             arg = evaluate(expr.arg, data, params, draws)
             T = eltype(arg)
             out = Array{T}(undef, size(arg))
             @. out = exp(arg)
+            out
+
+        elseif expr isa DCMLog
+            arg = evaluate(expr.arg, data, params, draws)
+            T = eltype(arg)
+            out = Array{T}(undef, size(arg))
+            @. out = log(arg)
             out
 
         elseif expr isa DCMEqual
