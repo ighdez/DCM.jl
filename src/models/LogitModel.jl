@@ -84,24 +84,24 @@ function logit_prob(
         utils[j] = evaluate(utilities[j], data, parameters)
     end
 
-    # Initialize matrix (N x J)
+    # Initialize arrays
     T = eltype(first(utils))
-    expU = zeros(T,N,J)
-    s_expU = zeros(T,N)
-    probs = zeros(T,N,J)
-
-    # Loop over rows
-    Threads.@threads for n in 1:N
-            for j in 1:J
-                U_nj = utils[j][n]
-                av_nj = availability[j][n]
-                expU[n,j] = av_nj ? exp(U_nj) : T(0.0)
-                s_expU[n] += expU[n,j]
-            end
-            for j in 1:J
-                probs[n,j] = expU[n,j] / s_expU[n]
-            end
-        end
+    
+    # Utilities
+    U = Array{T}(undef, N, J)
+    @inbounds for j in 1:J
+        @views U[:, j] .= utils[j]
+    end
+    
+    # Apply availability conditions
+    @inbounds for j in 1:J
+        @views U[:, j] .= ifelse.(availability[j], U[:, j], -Inf)
+    end
+    
+    # Calculate choice probabilities
+    expU = exp.(U)
+    s_expU = sum(expU, dims=2)
+    probs = expU ./ s_expU
 
     return probs
 end
@@ -256,6 +256,14 @@ function estimate(
     end
 
     if verbose
+        println("Warming-up hessian...")
+    end
+    # Warm-up hessian
+    H = zeros(length(θ0), length(θ0))
+    cfg = ForwardDiff.HessianConfig(f_obj, θ0)
+    H = ForwardDiff.hessian!(H, f_obj, θ0, cfg)
+
+    if verbose
         println("Starting optimization routine...")
     end
 
@@ -284,7 +292,7 @@ function estimate(
         println("Computing Standard Errors")
     end
 
-    H = FiniteDiff.finite_difference_hessian(f_obj, θ̂)
+    ForwardDiff.hessian!(H, f_obj, θ̂, cfg)
     
     vcov = try
         inv(H)
@@ -296,7 +304,6 @@ function estimate(
     t_end = time()
 
     se = Dict{Symbol, Real}()
-
     for (i, name) in enumerate(free_names)
         se[name] = std_errors[i]
     end
