@@ -107,12 +107,15 @@ Nothing. Prints formatted output to stdout.
 function summarize_results(results)
     params = results.parameters
     se_dict = results.std_errors
+    se_robust = results.rob_std_errors
     ll = results.loglikelihood
     iters = results.iters
     converged = results.converged
     estimation_time = results.estimation_time
 
     println("Estimation Results\n==================\n")
+
+    println("Classic Standard Errors")
     println(@sprintf("%-20s %10s %14s %10s %10s", "Parameter", "Estimate", "Std. Error", "t-Stat", "P-value"))
     println(repeat("-", 70))
 
@@ -127,11 +130,27 @@ function summarize_results(results)
         end
     end
 
+    println("\nRobust Standard Errors (Sandwich)")
+    println(@sprintf("%-20s %10s %14s %10s %10s", "Parameter", "Estimate", "Robust SE", "t-Stat", "P-value"))
+    println(repeat("-", 70))
+
+    for (name, value) in sort(collect(params); by=first)
+        if haskey(se_robust, name)
+            se = se_robust[name]
+            t = value / se
+            p = 2 * (1 - cdf(Normal(), abs(t)))
+            println(@sprintf("%-20s %10.4f %12.4f %10.4f %10.4f", string(name), value, se, t, p))
+        else
+            println(@sprintf("%-20s %10.4f %12s %10s %10s", string(name), value, "NA", "NA", "NA"))
+        end
+    end
+
+    println("\nModel Summary")
     println(@sprintf("Log-likelihood at optimum  : %10.4f", ll))
     println(@sprintf("Iterations                 : %10s", iters))
     println(@sprintf("Converged                  : %10s", converged))
     println(@sprintf("Estimation time (seconds)  : %10.2f", estimation_time))
-
 end
+
 
 export summarize_results, collect_parameters

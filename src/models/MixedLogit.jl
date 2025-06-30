@@ -247,7 +247,7 @@ function loglikelihood(model::MixedLogitModel, Y::Array{Bool,3};parameters::Dict
         end
     end
 
-    return sum(loglik)
+    return loglik
 end
 
 """
@@ -307,7 +307,7 @@ function estimate(model::MixedLogitModel, choicevar::Symbol; verbose::Bool = tru
     # Preallocate mutable parameter set (no deepcopy of full model)
     mutable_parameters = deepcopy(model.parameters)
 
-    function f_obj(θ)
+    function f_obj_i(θ)
         @inbounds begin
             for (i, name) in enumerate(free_names)
                 mutable_parameters[name] = θ[i]
@@ -322,9 +322,25 @@ function estimate(model::MixedLogitModel, choicevar::Symbol; verbose::Bool = tru
         return -loglik
     end
 
+    function f_obj(θ)
+        @inbounds begin
+            for (i, name) in enumerate(free_names)
+                mutable_parameters[name] = θ[i]
+            end
+            
+            for name in fixed_names
+                mutable_parameters[name] = init_values[name]
+            end
+        end
+
+        loglik = loglikelihood(model, Y; parameters=mutable_parameters)
+        return -sum(loglik)
+    end
+
     if verbose
         println("Warming-up hessian...")
     end
+    
     # Warm-up hessian
     H = zeros(length(θ0), length(θ0))
     cfg = ForwardDiff.HessianConfig(f_obj, θ0)
@@ -383,18 +399,39 @@ function estimate(model::MixedLogitModel, choicevar::Symbol; verbose::Bool = tru
     end
     
     std_errors = sqrt.(diag(vcov))
-    t_end = time()
 
     se = Dict{Symbol, Real}()
     for (i, name) in enumerate(free_names)
         se[name] = std_errors[i]
     end
 
+    if verbose
+        println("Computing Robust Standard Errors")
+    end
+    scores = ForwardDiff.jacobian(f_obj_i, θ̂)  # N × K
+    G = scores' * scores  # K × K    
+
+    V_rob = try
+        inv(H) * G * inv(H)
+    catch
+        pinv(H) * G * pinv(H)
+    end
+
+    rob_std_errors = sqrt.(diag(V_rob))
+
+    rob_se = Dict{Symbol, Real}()
+    for (i, name) in enumerate(free_names)
+        rob_se[name] = rob_std_errors[i]
+    end
+
+    t_end = time()
     return (
         result = result,
         parameters = estimated_params,
         std_errors = se,
         vcov = vcov,
+        rob_std_errors = rob_se,
+        rob_vcov = V_rob,
         loglikelihood = -Optim.minimum(result),
         iters = Optim.iterations(result),
         converged = Optim.converged(result),
