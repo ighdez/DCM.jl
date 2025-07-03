@@ -1,22 +1,13 @@
 """
-Helper functions for working with utility expressions and model results.
+Extracts all distinct parameters from a list of utility expressions.
 
-This module defines support tools such as parameter collection from symbolic utilities and result summarization.
-"""
-
-"""
-function collect_parameters(utilities::Vector{<:DCMExpression})
-
-Extracts all distinct parameters from a vector of symbolic utility expressions.
-Traverses each expression and returns a list of unique `DCMParameter` instances.
+Traverses the expression trees and returns all unique instances of `DCMParameter`.
 
 # Arguments
-
-* `utilities`: vector of utility expressions (`Vector{<:DCMExpression}`)
+- `utilities::Vector{<:DCMExpression}`: vector of symbolic utility expressions
 
 # Returns
-
-Vector of `DCMParameter` instances
+- `Vector{DCMParameter}`: unique parameters used in the utilities
 """
 function collect_parameters(utilities::Vector{<:DCMExpression})
     seen = Dict{Symbol, DCMParameter}()
@@ -36,6 +27,17 @@ function collect_parameters(utilities::Vector{<:DCMExpression})
     return collect(values(seen))
 end
 
+"""
+Extracts all variable names used in a list of utility expressions.
+
+Traverses the expression trees to find all `DCMVariable` symbols.
+
+# Arguments
+- `utilities::Vector{<:DCMExpression}`: vector of symbolic utility expressions
+
+# Returns
+- `Vector{Symbol}`: names of variables appearing in the expressions
+"""
 function collect_variables(utilities::Vector{<:DCMExpression})
     seen = Dict{Symbol, Bool}()
     function visit(expr)
@@ -54,23 +56,16 @@ function collect_variables(utilities::Vector{<:DCMExpression})
     return collect(keys(seen))
 end
 
-
 """
-    collect_draws(expr::DCMExpression) -> Vector{Symbol}
+Recursively collects all unique draw names (`Symbol`) from a symbolic expression.
 
-Recursively collects all unique draw names (`Symbol`) from a utility expression tree.
-
-This function traverses any expression involving `DCMDraw` nodes (i.e., placeholders
-for random draws) and returns a vector of the names of these draws, with duplicates removed.
-
-This is typically used when building a `MixedLogitModel`, to determine which draws
-need to be generated for estimation or simulation.
+Used for identifying the random terms in Mixed Logit specifications.
 
 # Arguments
-- `expr`: A `DCMExpression`, such as a utility function involving random parameters.
+- `expr::DCMExpression`: symbolic utility expression
 
 # Returns
-- A `Vector{Symbol}` with the names of all unique `DCMDraw` objects found in the expression.
+- `Vector{Symbol}`: names of draws used in the expression
 """
 function collect_draws(utilities::Vector{<:DCMExpression})
     seen = Dict{Symbol, Bool}()
@@ -91,20 +86,25 @@ function collect_draws(utilities::Vector{<:DCMExpression})
 end
 
 """
-function summarize_results(results)
-
 Pretty-prints estimation results including estimates, standard errors, t-stats, and p-values.
 
-# Arguments
+This function is designed for displaying results from a Logit or Mixed Logit model
+estimated via the `estimate` function.
 
-* `results`: named tuple returned from an estimation (should include keys `parameters`, `std_errors`, `loglikelihood`, `iters`, `converged`, and `estimation_time`)
+# Arguments
+- `results::NamedTuple`: named tuple returned from model estimation, containing fields:
+    - `parameters`: Dict of estimated parameter values
+    - `std_errors`: Dict of classical standard errors
+    - `rob_std_errors`: Dict of robust standard errors (optional)
+    - `loglikelihood`: log-likelihood value
+    - `iters`: number of iterations
+    - `converged`: convergence flag
+    - `estimation_time`: runtime in seconds
 
 # Returns
-
-Nothing. Prints formatted output to stdout.
+- Nothing. Prints output to console.
 """
-
-function summarize_results(results)
+function summarize_results(results::NamedTuple)
     params = results.parameters
     se_dict = results.std_errors
     se_robust = results.rob_std_errors
@@ -152,6 +152,17 @@ function summarize_results(results)
     println(@sprintf("Estimation time (seconds)  : %10.2f", estimation_time))
 end
 
+"""
+Pretty-prints results from evaluating derived expressions (e.g., WTP, elasticities).
+
+Used to display values and their standard errors (e.g., computed via Delta method).
+
+# Arguments
+- `results::Dict{Symbol,<:NamedTuple}`: dictionary with results per expression, where each value has fields `value` and `std_error`
+
+# Returns
+- Nothing. Prints output to console.
+"""
 function summarize_expressions(results::Dict{Symbol,<:NamedTuple})
     println("Expression Evaluation\n======================\n")
 

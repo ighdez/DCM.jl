@@ -7,17 +7,17 @@ This module defines the LogitModel struct and all associated functions required 
 using DataFrames
 
 """
-LogitModel
-
 Data structure for multinomial logit models.
 
-Fields:
+Encapsulates symbolic utility functions, data, parameters, and availability constraints
+used in estimation and prediction.
 
-* `utilities`: Vector of symbolic utility expressions (one per alternative)
-* `data`: DataFrame containing the input data
-* `parameters`: Dictionary of parameter values
-* `availability`: Vector of boolean vectors indicating alternative availability per observation
-  """
+# Fields
+- `utilities::Vector{<:DCMExpression}`: utility expressions (one per alternative)
+- `data::DataFrame`: input dataset
+- `parameters::Dict`: parameter values (estimates or fixed)
+- `availability::Vector{Vector{Bool}}`: list of availability vectors per alternative (optional)
+"""
 struct LogitModel <: DiscreteChoiceModel
     utilities::Vector{<:DCMExpression}
     data::DataFrame
@@ -25,27 +25,17 @@ struct LogitModel <: DiscreteChoiceModel
     availability::Vector{<:AbstractVector{Bool}}
 end
 
-
 """
-function LogitModel(
-    utilities::Vector{<:DCMExpression};
-    data::DataFrame,
-    parameters::Dict = Dict(),
-    availability::Vector{<:AbstractVector{Bool}} = []
-)
-
 Constructor for `LogitModel`.
 
 # Arguments
-
-* `utilities`: vector of symbolic utility expressions
-* `data`: DataFrame with data used for evaluation
-* `parameters`: dictionary with initial/fixed parameter values (optional)
-* `availability`: availability flags per alternative (optional)
+- `utilities`: vector of symbolic utility expressions
+- `data`: `DataFrame` with explanatory variables
+- `parameters`: initial/fixed values for model parameters (default: empty `Dict()`)
+- `availability`: list of boolean vectors indicating which alternatives are available (default: all available)
 
 # Returns
-
-A `LogitModel` instance
+- A `LogitModel` instance
 """
 function LogitModel(
     utilities::Vector{<:DCMExpression};
@@ -57,18 +47,16 @@ function LogitModel(
 end
 
 """
-Computes choice probabilities for the Multinomial Logit model.
+Computes choice probabilities under the Multinomial Logit model.
 
 # Arguments
-
-* `utilities`: vector of symbolic utility expressions (one per alternative)
-* `data`: DataFrame of input data
-* `parameters`: parameter dictionary with values for evaluation
-* `availability`: vector of boolean vectors indicating available alternatives
+- `utilities`: vector of symbolic utility expressions
+- `data`: `DataFrame` of observed variables
+- `parameters`: dictionary mapping parameter names to values
+- `availability`: vector of boolean vectors indicating available alternatives for each observation
 
 # Returns
-
-A vector of vectors, each inner vector representing choice probabilities for each alternative per observation.
+- `Vector{Vector{Float64}}`: each inner vector contains probabilities for all alternatives for one observation
 """
 function logit_prob(
     utilities::Vector{<:DCMExpression},
@@ -107,42 +95,14 @@ function logit_prob(
 end
 
 """
-function predict(model::LogitModel)
-
-Computes predicted probabilities for each alternative using the current parameters in the model.
-
-# Arguments
-
-* `model`: a `LogitModel` instance
-
-# Returns
-
-A vector of vectors with choice probabilities
-"""
-function predict(model::LogitModel)
-    probs = logit_prob(
-        model.utilities,
-        model.data,
-        model.availability,
-        model.parameters,
-    )
-    return probs
-end
-
-
-"""
-function predict(model::LogitModel,results)
-
 Computes predicted probabilities using estimated parameters.
 
 # Arguments
-
-* `model`: a `LogitModel` instance
-* `results`: a named tuple returned by `estimate`
+- `model::LogitModel`: the model structure
+- `results::NamedTuple`: output of `estimate`, must include `parameters`
 
 # Returns
-
-A matrix of size N x J, where N is number of observations, J number of alternatives
+- `Vector{Vector{Float64}}`: predicted probabilities for each observation
 """
 function predict(model::LogitModel,results::NamedTuple)
     probs = logit_prob(
@@ -154,20 +114,15 @@ function predict(model::LogitModel,results::NamedTuple)
     return probs
 end
 
-
 """
-function loglikelihood(model::LogitModel, choices::Vector{Int})
-
-Computes the log-likelihood value of the model given observed choices.
+Computes the log-likelihood of the model given observed choices.
 
 # Arguments
-
-* `model`: `LogitModel` instance
-* `choices`: vector of integers representing chosen alternatives
+- `model::LogitModel`: model object with defined parameters
+- `choices::Vector{Int}`: vector with indices of chosen alternatives for each observation
 
 # Returns
-
-Total log-likelihood value
+- `Vector{Float64}`: log-likelihood contribution per observation
 """
 function loglikelihood(model::LogitModel, choices::Vector{Int})
     probs = logit_prob(
@@ -193,29 +148,27 @@ function loglikelihood(model::LogitModel, choices::Vector{Int})
 end
 
 """
-function estimate(model::LogitModel, choicevar; verbose = true)
+Estimates the parameters of a `LogitModel` via maximum likelihood.
 
-Estimates model parameters using maximum likelihood estimation.
-Uses `Optim.jl` to minimize the negative log-likelihood.
+Uses `Optim.jl` to minimize the negative log-likelihood. Computes standard errors via inverse Hessian.
 
 # Arguments
-
-* `model`: a `LogitModel` instance
-* `choicevar`: vector of chosen alternatives
-* `verbose`: whether to print optimization status (default: true)
+- `model::LogitModel`: model specification
+- `choicevar::Vector{Int}`: chosen alternatives (1-based indexing)
+- `verbose::Bool=true`: whether to print optimization progress
 
 # Returns
-
-Named tuple with results, including:
-
-* `parameters`: estimated parameters
-* `std_errors`: standard errors
-* `vcov`: variance-covariance matrix
-* `loglikelihood`: log-likelihood value
-* `iters`: number of iterations
-* `converged`: convergence status
-* `estimation_time`: total time in seconds
-  """
+- `NamedTuple` containing:
+    - `parameters`: estimated values
+    - `std_errors`: classical standard errors
+    - `rob_std_errors`: robust standard errors (White)
+    - `vcov`: classical variance-covariance matrix
+    - `rob_vcov`: robust variance-covariance matrix
+    - `loglikelihood`: log-likelihood at optimum
+    - `iters`: number of iterations
+    - `converged`: convergence status
+    - `estimation_time`: time taken (in seconds)
+"""
 function estimate(
     model::LogitModel,
     choicevar::Vector{Int};
@@ -355,6 +308,22 @@ function estimate(
     )
 end
 
+"""
+Evaluates derived expressions (e.g. WTP, elasticities) based on a fitted LogitModel.
+
+Uses the Delta method to compute standard errors (both classical and robust) via gradient propagation.
+
+# Arguments
+- `expressions::Dict{Symbol, <:DCMExpression}`: expressions to evaluate, each identified by name
+- `model::LogitModel`: estimated model (structure, utilities, data)
+- `results::NamedTuple`: estimation results, must include `parameters`, `vcov`, and `rob_vcov`
+
+# Returns
+- `Dict{Symbol, NamedTuple}`: for each expression, returns a named tuple with:
+    - `value`: estimated mean value across observations
+    - `std_error`: standard error using classical variance
+    - `robust_std_error`: standard error using robust variance
+"""
 function evaluate(
     expressions::Dict{Symbol, <:DCMExpression},
     model::LogitModel,

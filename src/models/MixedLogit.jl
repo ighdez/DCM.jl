@@ -1,29 +1,19 @@
-"""
-Implementation of the MixedLogitModel type and estimation methods.
-
-This module defines the MixedLogitModel struct and all associated functions required to estimate, update, and predict a mixed multinomial logit model. Built on top of the symbolic utilities defined in Expressions.jl.
-"""
-
 using DataFrames, StatsBase
 
 """
-    MixedLogitModel
+Structure for a Mixed Logit model, allowing for random taste variation.
 
-    Structure for a mixed logit model (Mixed Logit). It allows defining symbolic utility functions
-    that include fixed and random parameters (represented by `Draw`). Automatically generates the
-    required draws for random coefficients during model construction.
+Combines symbolic utility expressions (fixed and random parameters) with data and simulation draws.
 
-    # Fields
-    - `utilities::Vector{DCMExpression}`: List of utility expressions for each alternative.
-    - `data::DataFrame`: Dataset with individual choice observations.
-    - `id::Vector{Int}`: ID variable
-    - `availability::Vector{Vector{Bool}}`: Availability of each alternative per observation.
-    - `parameters::Dict{Symbol, Float64}`: Dictionary with initial parameter values.
-    - `draws::Dict{Symbol, Matrix{Float64}}`: Dictionary of draws, with matrices of size (R x N).
-    - `draw_scheme::Symbol`: Drawing scheme (`:normal`, `:uniform`, `:mlhs`, etc.).
-    - `R::Int`: Number of simulations per individual.
+# Fields
+- `utilities::Vector{DCMExpression}`: utility expressions per alternative
+- `data::DataFrame`: dataset with individual choice observations
+- `id::Tuple{Dict, Vector}`: mapping from observation ID to panel structure
+- `availability::Vector{Vector{Bool}}`: alternative availability flags per observation
+- `parameters::Dict{Symbol, Float64}`: dictionary of parameter values (means, std devs, etc.)
+- `draws::Dict{Symbol, Matrix{Float64}}`: simulation draws (size: `N × R`)
+- `R::Int`: number of draws per individual
 """
-
 struct MixedLogitModel <: DiscreteChoiceModel
     utilities::Vector{DCMExpression}                # Utility expressions V_j
     data::DataFrame                                 # Dataset
@@ -35,24 +25,21 @@ struct MixedLogitModel <: DiscreteChoiceModel
 end
 
 """
-    MixedLogitModel(utilities; data, availability, parameters, R, draw_scheme)
+Constructs a `MixedLogitModel` from symbolic utility expressions and model inputs.
 
-    Constructs a `MixedLogitModel` object from symbolic utility expressions. It automatically detects
-    all `Draw` objects used in the model, generates the required simulation draws, and stores all
-    necessary data for estimation and prediction.
+Automatically generates draws for all random parameters using the specified scheme.
 
-    See also: `generate_draws`, `Draw`, `Parameter`, `Variable`
+# Arguments
+- `utilities`: vector of symbolic utility expressions
+- `data`: DataFrame with observations
+- `availability`: list of availability vectors
+- `parameters`: dictionary with initial values (including means/sigmas)
+- `R`: number of draws per individual
+- `draw_scheme`: symbol indicating sampling method (`:normal`, `:uniform`, `:mlhs`, etc.)
+- `id`: optional vector of individual IDs (for panel structure)
 
-    # Arguments
-    - `utilities::Vector{DCMExpression}`: Utility expressions for each alternative.
-    - `data::DataFrame`: Dataset.
-    - `availability::Vector{Vector{Bool}}` (optional): Availability indicators.
-    - `parameters::Dict` (optional): Initial parameter values.
-    - `R::Int` (optional): Number of simulations.
-    - `draw_scheme::Symbol` (optional): Drawing scheme (e.g., `:normal`, `:mlhs`).
-
-    # Returns
-    - `MixedLogitModel`: A model object ready for estimation or prediction.
+# Returns
+- `MixedLogitModel` instance with utility functions and simulation-ready data
 """
 function MixedLogitModel(
     utilities::Vector{<:DCMExpression};
@@ -106,14 +93,21 @@ function MixedLogitModel(
 end
 
 """
-    logit_prob(utilities, data, parameters, availability, draws, R)
+Computes conditional choice probabilities for Mixed Logit using simulation draws.
 
-    Computes simulated choice probabilities for a Mixed Logit Model using R draws.
+Evaluates utility expressions for each alternative and draw, then applies the softmax (MNL) formula
+across the alternatives, incorporating availability constraints.
 
-    # Returns
-    - Matrix{Float64} of size (N, J): Simulated choice probabilities.
+# Arguments
+- `utilities::Vector{<:DCMExpression}`: utility expressions per alternative
+- `data::DataFrame`: dataset with variables
+- `parameters::Dict`: dictionary with values for all model parameters
+- `availability::Vector{Vector{Bool}}`: availability flags (length J, each vector of size N)
+- `draws::Dict{Symbol, Matrix{Float64}}`: draws per parameter (each of size N × R)
+
+# Returns
+- `Array{Float64, 3}`: probability tensor of size N × J × R (individual, alternative, draw)
 """
-
 function logit_prob(
     utilities::Vector{<:DCMExpression},
     data::DataFrame,
@@ -154,36 +148,15 @@ function logit_prob(
     return probs
 end
 
-
 """
-    predict(model::MixedLogitModel)
+Predicts choice probabilities using a set of estimated parameters.
 
-    Computes predicted choice probabilities for each alternative using simulated draws.
+# Arguments
+- `model::MixedLogitModel`: the model structure
+- `results::NamedTuple`: estimation results with field `parameters`
 
-    # Returns
-    - Matrix{Float64} of size (N, J): Simulated choice probabilities.
-"""
-function predict(model::MixedLogitModel)
-    return logit_prob(
-        model.utilities,
-        model.data,
-        model.parameters,
-        model.availability,
-        model.draws
-    )
-end
-
-"""
-    predict(model::MixedLogitModel, results)
-
-    Computes predicted probabilities using estimated parameters from `results`.
-
-    # Arguments
-    - `model`: a `MixedLogitModel` instance
-    - `results`: a named tuple with at least a `parameters` field
-
-    # Returns
-    - Matrix{Float64} of size (N, J): Simulated choice probabilities
+# Returns
+- `Array{Float64,3}`: simulated probabilities of shape (N, J, R)
 """
 function predict(model::MixedLogitModel, results)
     return logit_prob(
@@ -196,16 +169,15 @@ function predict(model::MixedLogitModel, results)
 end
 
 """
-    loglikelihood(model::MixedLogitModel, choices::Vector{Int})
+Computes the simulated log-likelihood of a Mixed Logit model.
 
-    Computes the log-likelihood of a Mixed Logit Model given observed choices.
+# Arguments
+- `model::MixedLogitModel`: the model object
+- `Y::Array{Bool,3}`: indicator tensor (N, J, R) showing chosen alternative per draw
+- `parameters::Dict=mutable_parameters`: parameter values (default uses current model values)
 
-    # Arguments
-    - `model`: a `MixedLogitModel` instance
-    - `choices`: vector of integers representing chosen alternatives
-
-    # Returns
-    - Total log-likelihood value (Float64)
+# Returns
+- `Float64`: total simulated log-likelihood over all individuals
 """
 function loglikelihood(model::MixedLogitModel, Y::Array{Bool,3};parameters::Dict=mutable_parameters)
     probs = logit_prob(
@@ -251,24 +223,26 @@ function loglikelihood(model::MixedLogitModel, Y::Array{Bool,3};parameters::Dict
 end
 
 """
-    estimate(model::MixedLogitModel, choicevar; verbose = true)
+Estimates the parameters of a Mixed Logit model using simulated maximum likelihood.
 
-    Estimates the parameters of a `MixedLogitModel` via simulated maximum likelihood using `Optim.jl`.
+Uses optimization via `Optim.jl` to minimize the negative simulated log-likelihood.
 
-    # Arguments
-    - `model`: a `MixedLogitModel` instance
-    - `choicevar`: vector of integers indicating the chosen alternatives
-    - `verbose`: whether to print status messages (default: true)
+# Arguments
+- `model::MixedLogitModel`: model specification with draws and utility functions
+- `choicevar::Symbol`: name of the column in `model.data` that contains observed choices
+- `verbose::Bool = true`: whether to print optimizer output
 
-    # Returns
-    - Named tuple with estimation results:
-        - `parameters`: estimated parameter values
-        - `std_errors`: standard errors for free parameters
-        - `vcov`: variance-covariance matrix
-        - `loglikelihood`: final log-likelihood value
-        - `iters`: number of iterations
-        - `converged`: convergence status
-        - `estimation_time`: total time in seconds
+# Returns
+- `NamedTuple` with fields:
+    - `parameters`: estimated values
+    - `std_errors`: classical standard errors
+    - `rob_std_errors`: robust standard errors (White)
+    - `vcov`: classical variance-covariance matrix
+    - `rob_vcov`: robust variance-covariance matrix
+    - `loglikelihood`: log-likelihood at optimum
+    - `iters`: number of iterations
+    - `converged`: whether the optimizer converged
+    - `estimation_time`: total runtime in seconds
 """
 function estimate(model::MixedLogitModel, choicevar::Symbol; verbose::Bool = true)
     
@@ -436,6 +410,5 @@ function evaluate(
     model::MixedLogitModel,
     results::NamedTuple
 )
-
     error("Evaluate for MixedLogitModel is not implemented yet")
 end

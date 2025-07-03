@@ -3,11 +3,12 @@ using Random, Distributions, Sobol, StatsBase
 export Draws, generate_draws
 
 """
-Struct to hold simulation draws used for random parameters.
+Struct to hold simulation draws used for random parameters in Mixed Logit models.
 
-- `values`: Dict with parameter name => matrix (N x R)
-- `scheme`: Symbol indicating sampling scheme (:normal, :uniform, :halton, :mlhs)
-- `R`: number of draws per individual
+# Fields
+- `values::Dict`: mapping from parameter names to draw matrices (`N × R`)
+- `scheme::Symbol`: name of the sampling scheme (`:normal`, `:uniform`, `:halton`, `:mlhs`)
+- `R::Int`: number of draws per individual
 """
 struct Draws
     values::Dict
@@ -19,13 +20,13 @@ end
 Generates simulation draws for each parameter name provided.
 
 # Arguments
-- `param_names`: list of Symbols (e.g., [:time, :cost])
-- `N`: number of individuals
-- `R`: number of draws
-- `scheme`: Symbol indicating sampling scheme (:normal, :uniform, :halton, :mlhs)
+- `param_names::Vector{Symbol}`: list of parameter names
+- `N::Int`: number of individuals
+- `R::Int`: number of draws per individual
+- `scheme::Symbol = :normal`: sampling scheme; one of `:normal`, `:uniform`, `:halton`, `:mlhs`
 
 # Returns
-- `Draws` object containing the generated values
+- `Draws`: object containing a dictionary of draw matrices and metadata
 """
 function generate_draws(param_names::Vector{Symbol}, N::Int, R::Int; scheme::Symbol = :normal)
     values = Dict()
@@ -51,7 +52,20 @@ function generate_draws(param_names::Vector{Symbol}, N::Int, R::Int; scheme::Sym
     return Draws(values, scheme, R)
 end
 
-# Halton sequence generator (using Sobol as a placeholder or to be replaced)
+"""
+Generates Halton sequence draws for a specific parameter.
+
+Each parameter is assigned a prime base based on its name, then Halton sequences are generated
+and transformed via the Normal quantile function.
+
+# Arguments
+- `N::Int`: number of individuals
+- `R::Int`: number of draws
+- `pname::Symbol`: parameter name (used to assign Halton base)
+
+# Returns
+- `Matrix{Float64}`: a `N × R` matrix of transformed Halton draws
+"""
 function halton_draws(N::Int, R::Int, pname::Symbol)
     function halton(n, base)
         f, r = 1.0, 0.0
@@ -77,7 +91,20 @@ function halton_draws(N::Int, R::Int, pname::Symbol)
     return draws
 end
 
-# Modified Latin Hypercube Sampling
+"""
+Generates Modified Latin Hypercube Sampling (MLHS) draws for a specific parameter.
+
+This method improves coverage of the sampling space by stratifying the uniform distribution,
+and then applies the inverse CDF of the standard normal to each value.
+
+# Arguments
+- `N::Int`: number of individuals
+- `R::Int`: number of draws per individual
+- `pname::Symbol`: parameter name (not used directly, included for API symmetry)
+
+# Returns
+- `Matrix{Float64}`: a `N × R` matrix of MLHS draws (normally distributed)
+"""
 function mlhs_draws(N::Int, R::Int, pname::Symbol)
     draws = zeros(N, R)
     for i in 1:N
