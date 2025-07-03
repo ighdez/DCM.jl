@@ -354,15 +354,7 @@ function estimate(model::MixedLogitModel, choicevar::Symbol; verbose::Bool = tru
     result = Optim.optimize(
         f_obj,
         θ0,
-        Optim.BFGS(linesearch=LineSearches.BackTracking()),#linesearch = LineSearches.HagerZhang(
-            # delta = 0.2,           # más conservador que 0.1
-            # sigma = 0.8,           # curvatura fuerte (evita pasos grandes)
-            # alphamax = 1.0,        # permite explorar pasos amplios (útil si gradientes son suaves)
-            # rho = 1e-6,            # mínima diferencia relativa entre pasos
-            # epsilon = 1e-4,        # precisión media (puede subir si el gradiente es ruidoso)
-            # gamma = 1e-4,          # estabilidad numérica
-            # linesearchmax = 30,    # permitir más pasos si gradiente es irregular
-            # )),
+        Optim.BFGS(linesearch=LineSearches.BackTracking()),
             Optim.Options(
             show_trace = verbose,
             iterations = 1000,
@@ -437,4 +429,13 @@ function estimate(model::MixedLogitModel, choicevar::Symbol; verbose::Bool = tru
         converged = Optim.converged(result),
         estimation_time = t_end - t_start
     )
+end
+
+function evaluate(
+    expressions::Dict{Symbol, <:DCMExpression},
+    model::MixedLogitModel,
+    results::NamedTuple
+)
+
+    error("Evaluate for MixedLogitModel is not implemented yet")
 end

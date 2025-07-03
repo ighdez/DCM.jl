@@ -355,10 +355,40 @@ function estimate(
     )
 end
 
-function evaluate(expr::Union{DCMExpression,Vector{<:DCMExpression}},model::LogitModel,results::NamedTuple)
-    if expr isa DCMExpression
-        return mean(evaluate(expr,model.data,results.parameters))
-    elseif expr isa Vector{<:DCMExpression}
-        return [mean(evaluate(i,model.data,results.parameters)) for i in expr]
+function evaluate(
+    expressions::Dict{Symbol, <:DCMExpression},
+    model::LogitModel,
+    results::NamedTuple
+)
+    # 1. Extraer nombres de parámetros libres y su orden
+    all_params = collect_parameters(model.utilities)
+    free_params = filter(p -> !p.fixed, all_params)
+    free_names = [p.name for p in free_params]
+    θ̂ = [results.parameters[n] for n in free_names]
+
+    output = Dict{Symbol, NamedTuple{(:value, :std_error, :robust_std_error), Tuple{Float64, Float64, Float64}}}()
+
+    for (name, expr) in expressions
+        # 2. Definir función escalar
+        f_expr = θ -> begin
+            param_dict = copy(results.parameters)
+            for (i, pname) in enumerate(free_names)
+                param_dict[pname] = θ[i]
+            end
+            mean(evaluate(expr, model.data, param_dict))
+        end
+
+        # 3. Evaluar función y gradiente
+        val = f_expr(θ̂)
+        g = ForwardDiff.gradient(f_expr, θ̂)
+
+        # 4. Errores estándar
+        se_normal  = sqrt(g' * results.vcov * g)
+        se_robust  = sqrt(g' * results.rob_vcov * g)
+
+        # 5. Almacenar resultados
+        output[name] = (value = val, std_error = se_normal, robust_std_error = se_robust)
     end
+
+    return output
 end

@@ -48,6 +48,16 @@ results = estimate(model, df.CHOICE)
 
 # Output results
 summarize_results(results)
+println('\n')
+
+# Evaluate WTP
+expressions = Dict(
+    :WTP => β_time / β_cost,
+    :ASC_ratio => asc_car / asc_train
+)
+
+wtp = evaluate(expressions, model, results)
+summarize_expressions(wtp)
 
 # Predict
 preds = predict(model,results)

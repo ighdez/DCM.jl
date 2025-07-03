@@ -48,8 +48,12 @@ println("\nAverage of Logit predictions")
 println(mean(preds,dims=1))
 
 # Evaluate WTP
-wtp_car = β_time_car / β_cost
-wtp_bus = β_time_bus / β_cost
-wtp_air = β_time_air / β_cost
-wtp_rail = β_time_rail / β_cost
-@show evaluate([wtp_car,wtp_bus,wtp_air,wtp_rail],model,results)
+expressions = Dict(
+:wtp_car => β_time_car / β_cost,
+:wtp_bus => β_time_bus / β_cost,
+:wtp_air => β_time_air / β_cost,
+:wtp_rail => β_time_rail / β_cost,
+)
+
+wtp = evaluate(expressions, model, results)
+summarize_expressions(wtp)

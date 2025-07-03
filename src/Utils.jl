@@ -152,5 +152,32 @@ function summarize_results(results)
     println(@sprintf("Estimation time (seconds)  : %10.2f", estimation_time))
 end
 
+function summarize_expressions(results::Dict{Symbol,<:NamedTuple})
+    println("Expression Evaluation\n======================\n")
 
-export summarize_results, collect_parameters
+    println("Classic Standard Errors")
+    println(@sprintf("%-20s %10s %14s %10s %10s", "Expression", "Value", "Std. Error", "t-Stat", "P-value"))
+    println(repeat("-", 70))
+
+    for (name, output) in sort(collect(results); by=first)
+        value = output.value
+        se = output.std_error
+        t = value / se
+        p = 2 * (1 - cdf(Normal(), abs(t)))
+        println(@sprintf("%-20s %10.4f %12.4f %10.4f %10.4f", string(name), value, se, t, p))
+    end
+
+    println("\nRobust Standard Errors (Sandwich)")
+    println(@sprintf("%-20s %10s %14s %10s %10s", "Expression", "Value", "Robust SE", "t-Stat", "P-value"))
+    println(repeat("-", 70))
+
+    for (name, output) in sort(collect(results); by=first)
+        value = output.value
+        se = output.robust_std_error
+        t = value / se
+        p = 2 * (1 - cdf(Normal(), abs(t)))
+        println(@sprintf("%-20s %10.4f %12.4f %10.4f %10.4f", string(name), value, se, t, p))
+    end
+end
+
+export summarize_results, summarize_expressions
