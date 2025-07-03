@@ -154,7 +154,7 @@ Uses `Optim.jl` to minimize the negative log-likelihood. Computes standard error
 
 # Arguments
 - `model::LogitModel`: model specification
-- `choicevar::Vector{Int}`: chosen alternatives (1-based indexing)
+- `choicevar::Symbol`: name of the column in `model.data` that contains observed choices
 - `verbose::Bool=true`: whether to print optimization progress
 
 # Returns
@@ -171,15 +171,17 @@ Uses `Optim.jl` to minimize the negative log-likelihood. Computes standard error
 """
 function estimate(
     model::LogitModel,
-    choicevar::Vector{Int};
+    choicevar::Symbol;
     verbose::Bool = true
 )
 
-    if any(ismissing, choicevar)
+    choice_data = model.data[:,choicevar]
+
+    if any(ismissing, choice_data)
         error("Choice vector contains missing values. Please clean your data.")
     end
 
-    choices = Int.(choicevar)
+    choices = Int.(choice_data)
     
     params = collect_parameters(model.utilities)
     param_names = [p.name for p in params]
