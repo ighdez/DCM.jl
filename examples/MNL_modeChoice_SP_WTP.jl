@@ -41,7 +41,7 @@ availability = [
 
 # Create model and estimate
 model = LogitModel(utilities; data=df, availability=availability)
-results = estimate(model, df.choice)
+results = estimate(model, :choice)
 
 # Output results
 summarize_results(results)
