@@ -19,12 +19,20 @@ function collect_parameters(utilities::Vector{<:DCMExpression})
             visit(expr.right)
         elseif expr isa DCMUnary
             visit(expr.arg)
+        elseif expr isa LogitModel
+            for u in expr.utilities
+                visit(u)
+            end
         end
     end
     for u in utilities
         visit(u)
     end
     return collect(values(seen))
+end
+
+function collect_parameters(expr::DCMExpression)
+    collect_parameters([expr])
 end
 
 """

@@ -10,7 +10,7 @@ end
 function LatentClassModel(
     expression::DCMExpression;
     data::DataFrame,
-    idvar::Union{Nothing,Symbol},
+    idvar::Union{Nothing,Symbol}=nothing,
     parameters::Dict = Dict()
 )
 
@@ -42,7 +42,7 @@ function LatentClassModel(
 end
 
 function loglikelihood(model::LatentClassModel, Y::Matrix{Bool}; parameters::Dict = model.parameters)
-    probs = evaluate(model.expr, parameters, Dict(), model.data)  # N × J
+    probs = evaluate(model.expr, model.data, parameters)  # N × J
     N, J = size(probs)
 
     # Ensure numerical stability
@@ -53,7 +53,7 @@ function loglikelihood(model::LatentClassModel, Y::Matrix{Bool}; parameters::Dic
     log_chosen = log.(chosen_probs)
 
     if isnothing(model.id)
-        return sum(log_chosen)  # Cross-sectional log-likelihood
+        return log_chosen  # Cross-sectional log-likelihood
     else
         id_map, id = model.id
         I = length(id_map)
@@ -64,15 +64,14 @@ function loglikelihood(model::LatentClassModel, Y::Matrix{Bool}; parameters::Dic
             log_indiv[i] += log_chosen[n]
         end
 
-        return sum(log_indiv)  # Panel log-likelihood
+        return log_indiv  # Panel log-likelihood
     end
 end
 
 function estimate(model::LatentClassModel, choicevar::Symbol; verbose::Bool = true)
 
     # Parameter setup
-    params = collect_parameters([model.expr])
-    @show params
+    params = collect_parameters(model.expr)
     param_names = [p.name for p in params]
     init_values = Dict(p.name => p.value for p in params)
     is_fixed = [p.fixed for p in params]
@@ -88,7 +87,7 @@ function estimate(model::LatentClassModel, choicevar::Symbol; verbose::Bool = tr
 
     choices = Int.(choice_data)
     
-    J = size(evaluate(model.expr, model.data, params), 2)
+    J = size(evaluate(model.expr, model.data, init_values), 2)
     N = length(choices)
 
     # Build Y: N × J matrix (one-hot)

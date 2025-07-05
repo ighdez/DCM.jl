@@ -63,9 +63,10 @@ availability = [
 
 # Define Class parameters
 delta_1 = Parameter(:delta_1, value = 0)
+delta_2 = Parameter(:delta_2, value = 0, fixed=true)
 
-prob_1 = 1/(1+exp(-delta_1))
-prob_2 = 1 - prob_1
+prob_1 = exp(delta_1) / (exp(delta_1) + exp(delta_2))
+prob_2 = exp(delta_2) / (exp(delta_1) + exp(delta_2))
 
 # Create conditional probabilities
 model_1 = LogitModel(utilities_1; data=df, availability=availability)
