@@ -43,6 +43,17 @@ struct DCMSum <: DCMBinary
 end
 
 """
+Symbolic difference of two expressions.
+
+# Fields
+- `left`, `right`: symbolic expressions
+"""
+struct DCMDiff <: DCMBinary
+    left::DCMExpression
+    right::DCMExpression
+end
+
+"""
 Symbolic multiplication of two expressions.
 
 # Fields
@@ -99,12 +110,26 @@ end
 import Base: ==, +, *, /, exp, log, -
 ==(a::DCMExpression, b::Real) = DCMEqual(a, b)
 +(a::DCMExpression, b::DCMExpression) = DCMSum(a, b)
+-(a::DCMExpression, b::DCMExpression) = DCMDiff(a, b)
 *(a::DCMExpression, b::DCMExpression) = DCMMult(a, b)
 /(a::DCMExpression, b::DCMExpression) = DCMDiv(a, b)
 exp(a::DCMExpression) = DCMExp(a)
 log(a::DCMExpression) = DCMLog(a)
 -(a::DCMExpression) = DCMMinus(a)
 
++(a::Real, b::DCMExpression) = DCMLiteral(a) + b
++(a::DCMExpression, b::Real) = a + DCMLiteral(b)
+
+-(a::Real, b::DCMExpression) = DCMLiteral(a) - b
+-(a::DCMExpression, b::Real) = a - DCMLiteral(b)
+
+*(a::Real, b::DCMExpression) = DCMLiteral(a) * b
+*(a::DCMExpression, b::Real) = a * DCMLiteral(b)
+
+/(a::Real, b::DCMExpression) = DCMLiteral(a) / b
+/(a::DCMExpression, b::Real) = a / DCMLiteral(b)
+
+^(a::DCMExpression, b::Real) = DCMPower(a, b)
 """
 Represents a named parameter in a utility expression.
 
@@ -197,8 +222,12 @@ function evaluate(expr::DCMExpression, data::DataFrame, params::AbstractDict)
         return fill(params[expr.name], nrow(data))
     elseif expr isa DCMVariable
         return data[:, expr.name]
+    elseif expr isa LogitModel
+        return logit_prob(expr.utilities,data,expr.availability,params)
     elseif expr isa DCMSum
         return evaluate(expr.left, data, params) .+ evaluate(expr.right, data, params)
+    elseif expr isa DCMDiff
+        return evaluate(expr.left, data, params) .- evaluate(expr.right, data, params)
     elseif expr isa DCMMult
         return evaluate(expr.left, data, params) .* evaluate(expr.right, data, params)
     elseif expr isa DCMDiv
