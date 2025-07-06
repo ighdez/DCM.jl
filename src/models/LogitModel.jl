@@ -124,12 +124,12 @@ Computes the log-likelihood of the model given observed choices.
 # Returns
 - `Vector{Float64}`: log-likelihood contribution per observation
 """
-function loglikelihood(model::LogitModel, choices::Vector{Int})
+function loglikelihood(model::LogitModel, choices::Vector{Int}; parameters::Dict = model.parameters)
     probs = logit_prob(
         model.utilities,
         model.data,
         model.availability,
-        model.parameters,
+        parameters,
     )
 
     N, _ = size(probs)
@@ -195,45 +195,55 @@ function estimate(
     # Initial guess only for free params
     θ0 = [init_values[n] for n in free_names]
 
-    mutable_struct = deepcopy(model)
+    mutable_parameters = deepcopy(model.parameters)
 
     function f_obj_i(θ)
-        @inbounds for (i, name) in enumerate(free_names)
-            mutable_struct.parameters[name] = θ[i]
+        @inbounds begin
+            for (i, name) in enumerate(free_names)
+                mutable_parameters[name] = θ[i]
+            end
+            
+            for name in fixed_names
+                mutable_parameters[name] = init_values[name]
+            end
         end
 
-        @inbounds for name in fixed_names
-            mutable_struct.parameters[name] = init_values[name]
-        end
-
-        loglik = loglikelihood(mutable_struct,choices)
+        loglik = loglikelihood(model, choices; parameters=mutable_parameters)
         return -loglik
     end
 
     function f_obj(θ)
-        @inbounds for (i, name) in enumerate(free_names)
-            mutable_struct.parameters[name] = θ[i]
+        @inbounds begin
+            for (i, name) in enumerate(free_names)
+                mutable_parameters[name] = θ[i]
+            end
+            
+            for name in fixed_names
+                mutable_parameters[name] = init_values[name]
+            end
         end
 
-        @inbounds for name in fixed_names
-            mutable_struct.parameters[name] = init_values[name]
-        end
-
-        loglik = loglikelihood(mutable_struct,choices)
+        loglik = loglikelihood(model, choices; parameters=mutable_parameters)
         return -sum(loglik)
     end
 
     if verbose
-        println("Warming-up hessian...")
+        println("Warming-up automatic differentiation...")
     end
     
-    # Warm-up hessian
+    # Warm-up automatic differentiation
     H = zeros(length(θ0), length(θ0))
     cfg = ForwardDiff.HessianConfig(f_obj, θ0)
     H = ForwardDiff.hessian!(H, f_obj, θ0, cfg)
+    
+    ForwardDiff.gradient(f_obj, θ0)
+    
+    scores = zeros(length(choice_data),length(θ0))
+    ForwardDiff.jacobian!(scores,f_obj_i, θ0)
 
     if verbose
         println("Starting optimization routine...")
+        println("Init Log-likelihood: ", round(-f_obj(θ0); digits=2))
     end
 
     t_start = time()
@@ -279,7 +289,7 @@ function estimate(
     if verbose
         println("Computing Robust Standard Errors")
     end
-    scores = ForwardDiff.jacobian(f_obj_i, θ̂)  # N × K
+    ForwardDiff.jacobian!(scores,f_obj_i, θ̂)  # N × K
     G = scores' * scores  # K × K    
 
     V_rob = try

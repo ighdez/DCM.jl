@@ -1,5 +1,3 @@
-__precompile__()
-
 """
 DCM.jl — A symbolic, extensible package for estimating Discrete Choice Models in Julia.
 
@@ -46,6 +44,8 @@ MIT License
 """
 
 module DCM
+
+__precompile__()
 
 using Optim, LineSearches, DataFrames, ForwardDiff, FiniteDiff, LinearAlgebra, Distributions, Printf, Base.Threads, StatsBase, Primes
 

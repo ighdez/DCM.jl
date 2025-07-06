@@ -312,16 +312,22 @@ function estimate(model::MixedLogitModel, choicevar::Symbol; verbose::Bool = tru
     end
 
     if verbose
-        println("Warming-up hessian...")
+        println("Warming-up automatic differentiation...")
     end
     
-    # Warm-up hessian
+    # Warm-up automatic differentiation
     H = zeros(length(θ0), length(θ0))
     cfg = ForwardDiff.HessianConfig(f_obj, θ0)
     H = ForwardDiff.hessian!(H, f_obj, θ0, cfg)
+    
+    ForwardDiff.gradient(f_obj, θ0)
+    
+    scores = zeros(length(choice_data),length(θ0))
+    ForwardDiff.jacobian!(scores,f_obj_i, θ0)
 
     if verbose
         println("Starting optimization routine...")
+        println("Init Log-likelihood: ", round(-f_obj(θ0); digits=2))
     end
     
     t_start = time()
@@ -374,7 +380,7 @@ function estimate(model::MixedLogitModel, choicevar::Symbol; verbose::Bool = tru
     if verbose
         println("Computing Robust Standard Errors")
     end
-    scores = ForwardDiff.jacobian(f_obj_i, θ̂)  # N × K
+    ForwardDiff.jacobian!(scores,f_obj_i, θ̂)  # N × K
     G = scores' * scores  # K × K    
 
     V_rob = try

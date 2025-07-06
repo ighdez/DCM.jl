@@ -123,15 +123,22 @@ function estimate(model::LatentClassModel, choicevar::Symbol; verbose::Bool = tr
     end
 
     if verbose
-        println("Warming-up Hessian...")
+        println("Warming-up automatic differentiation...")
     end
-
+    
+    # Warm-up automatic differentiation
     H = zeros(length(θ0), length(θ0))
     cfg = ForwardDiff.HessianConfig(f_obj, θ0)
-    ForwardDiff.hessian!(H, f_obj, θ0, cfg)
+    H = ForwardDiff.hessian!(H, f_obj, θ0, cfg)
+    
+    ForwardDiff.gradient(f_obj, θ0)
+    
+    scores = zeros(length(choice_data),length(θ0))
+    ForwardDiff.jacobian!(scores,f_obj_i, θ0)
 
     if verbose
-        println("Starting optimization...")
+        println("Starting optimization routine...")
+        println("Init Log-likelihood: ", round(-f_obj(θ0); digits=2))
     end
 
     t_start = time()
@@ -180,7 +187,7 @@ function estimate(model::LatentClassModel, choicevar::Symbol; verbose::Bool = tr
         println("Computing Robust Standard Errors...")
     end
 
-    scores = ForwardDiff.jacobian(f_obj_i, θ̂)
+    ForwardDiff.jacobian!(scores,f_obj_i, θ̂)  # N × K
     G = scores' * scores
 
     V_rob = try inv(H) * G * inv(H) catch; pinv(H) * G * pinv(H) end
@@ -205,4 +212,12 @@ function estimate(model::LatentClassModel, choicevar::Symbol; verbose::Bool = tr
         converged = Optim.converged(result),
         estimation_time = t_end - t_start
     )
+end
+
+function evaluate(
+    expressions::Dict{Symbol, <:DCMExpression},
+    model::LatentClassModel,
+    results::NamedTuple
+)
+    error("Evaluate for LatentClassModel is not implemented yet")
 end
