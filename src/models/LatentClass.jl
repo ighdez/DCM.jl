@@ -133,7 +133,7 @@ function estimate(model::LatentClassModel, choicevar::Symbol; verbose::Bool = tr
     
     ForwardDiff.gradient(f_obj, θ0)
     
-    scores = zeros(length(choice_data),length(θ0))
+    scores = zeros(length(f_obj_i(θ0)),length(θ0))
     ForwardDiff.jacobian!(scores,f_obj_i, θ0)
 
     if verbose

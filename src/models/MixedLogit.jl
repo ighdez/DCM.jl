@@ -322,7 +322,7 @@ function estimate(model::MixedLogitModel, choicevar::Symbol; verbose::Bool = tru
     
     ForwardDiff.gradient(f_obj, θ0)
     
-    scores = zeros(length(choice_data),length(θ0))
+    scores = zeros(length(f_obj_i(θ0)),length(θ0))
     ForwardDiff.jacobian!(scores,f_obj_i, θ0)
 
     if verbose
