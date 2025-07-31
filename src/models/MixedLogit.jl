@@ -223,6 +223,32 @@ function loglikelihood(model::MixedLogitModel, Y::Array{Bool,3};parameters::Dict
 end
 
 """
+Compute the log-likelihood of the null model, assuming equal choice probability
+over available alternatives for each individual.
+
+# Arguments
+- `availability::Vector{<:AbstractVector{Bool}}`: availability pattern per individual.
+
+# Returns
+- `ll0::Float64`: log-likelihood of the null (equal-probability) model.
+"""
+function null_loglikelihood_mxl(availability::Vector{<:AbstractVector{Bool}})
+    J = length(availability)
+    N = length(availability[1])
+
+    ll0 = 0.0
+    for i in 1:N
+        available = count(j -> availability[j][i], 1:J)
+        if available == 0
+            error("Observation $i has no available alternatives.")
+        end
+        ll0 -= log(available)
+    end
+
+    return ll0
+end
+
+"""
 Estimates the parameters of a Mixed Logit model using simulated maximum likelihood.
 
 Uses optimization via `Optim.jl` to minimize the negative simulated log-likelihood.
@@ -325,6 +351,8 @@ function estimate(model::MixedLogitModel, choicevar::Symbol; verbose::Bool = tru
     scores = zeros(length(f_obj_i(θ0)),length(θ0))
     ForwardDiff.jacobian!(scores,f_obj_i, θ0)
 
+    ll0 = null_loglikelihood_mxl(model.availability)
+
     if verbose
         println("Starting optimization routine...")
         println("Init Log-likelihood: ", round(-f_obj(θ0); digits=2))
@@ -404,10 +432,12 @@ function estimate(model::MixedLogitModel, choicevar::Symbol; verbose::Bool = tru
         vcov = vcov,
         rob_std_errors = rob_se,
         rob_vcov = V_rob,
+        null_loglikelihood = ll0,
         loglikelihood = -Optim.minimum(result),
         iters = Optim.iterations(result),
         converged = Optim.converged(result),
-        estimation_time = t_end - t_start
+        estimation_time = t_end - t_start,
+        N = nrow(model.data)
     )
 end
 

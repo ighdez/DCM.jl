@@ -40,7 +40,7 @@ model = LogitModel(utilities; data=df, availability=availability)
 results = estimate(model, :choice)
 
 # Output results
-summarize_results(results)
+summarize_results(results,file="MNL_modeChoice_RP.xlsx")
 
 # Predict
 preds = predict(model,results)
@@ -56,4 +56,4 @@ expressions = Dict(
 )
 
 wtp = evaluate(expressions, model, results)
-summarize_expressions(wtp)
+summarize_expressions(wtp, file="MNL_modeChoice_RP_WTP.xlsx")
